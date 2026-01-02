@@ -29,11 +29,4 @@
 		<nature>org.eclipse.cdt.managedbuilder.core.managedBuildNature</nature>
 		<nature>org.eclipse.cdt.managedbuilder.core.ScannerConfigNature</nature>
 	</natures>
-	<linkedResources>
-		<link>
-			<name>SRAM_FSMC.ioc</name>
-			<type>1</type>
-			<locationURI>PARENT-3-PROJECT_LOC/Downloads/STM32-FSMC-DMA-SRAM-IS62WV51216-main/STM32-FSMC-DMA-SRAM-IS62WV51216-main/SRAM_FSMC.ioc</locationURI>
-		</link>
-	</linkedResources>
 </projectDescription>

@@ -64,25 +64,9 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-#define EXTERNAL_SRAM_ADDR  ((uint32_t)0x60000000)
-#define SRAM_SIZE_WORDS     (1024 * 1024) // 1M words (16-bit each)
-
-uint16_t *sram = (uint16_t *)EXTERNAL_SRAM_ADDR;
-void Test_SRAM(void) {
-    // Write data
-    for (uint32_t i = 0; i < 1000; i++) {
-        sram[i] = (uint16_t)i;
-    }
-
-    // Read and verify
-    for (uint32_t i = 0; i < 1000; i++) {
-        if (sram[i] != (uint16_t)i) {
-            // Error handling: SRAM not connected or timing too fast
-            printf("SRAM Error at index %lu\n", i);
-            return;
-        }
-    }
-    printf("SRAM Test Passed!\n");
+uint8_t sdram_buffer[1000 * 1024] __attribute__((section(".sdram_data")));
+void Hard_Reset_SRAM_Chip(void) {
+    memset((void*)0x60000000, 0, 2 * 1024 * 1024);
 }
 /* USER CODE END 0 */
 
@@ -118,18 +102,8 @@ int main(void)
   MX_USB_DEVICE_Init();
   MX_FSMC_Init();
   /* USER CODE BEGIN 2 */
+  Hard_Reset_SRAM_Chip();
 
-//  HAL_Delay(1000);
-//  char data;
-//
-//    SRAM_Write_A();      // ✏️ GHI 'A'
-//    HAL_Delay(10);
-//
-//    data = SRAM_Read_A(); // 📖 ĐỌC
-//
-//    printf("SRAM DATA = %c\r\n", data); // phải in ra A
-//  char msg[] = "Hello USB CDC\r\n";
-  Test_SRAM();
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -139,13 +113,18 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-//	  printf("xin chao \n");
-//	  CDC_Transmit_FS((uint8_t*)msg, strlen(msg));
-//	  printf("chao ban\n");
-//	  HAL_Delay(1000);
-//	  Demo_SRAM_USB();
-//
-//	  HAL_Delay(1000);
+	  for(int i = 0; i < 1000 * 1024; i++)
+	         {
+	             sdram_buffer[i] = i & 0xFF;
+	         }
+
+	         for(int i = 0; i < 1000 * 1024; i += 512)
+	         {
+	             CDC_Transmit_FS(&sdram_buffer[i], 512);
+	             HAL_Delay(5);
+	         }
+
+	         HAL_Delay(5000);
   }
   /* USER CODE END 3 */
 }

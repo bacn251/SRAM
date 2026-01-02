@@ -48,6 +48,7 @@ MEMORY
   CCMRAM    (xrw)    : ORIGIN = 0x10000000,   LENGTH = 64K
   RAM    (xrw)    : ORIGIN = 0x20000000,   LENGTH = 128K
   FLASH    (rx)    : ORIGIN = 0x8000000,   LENGTH = 512K
+  SDRAM (xrw) : ORIGIN = 0x60000000 ,LENGTH =2M
 }
 
 /* Sections */
@@ -196,6 +197,15 @@ SECTIONS
     . = . + _Min_Stack_Size;
     . = ALIGN(8);
   } >RAM
+  
+  .sdram_data (NOLOAD) :
+	{
+  	. = ALIGN(4);
+  	*(.sdram_data)
+  	*(.sdram_data*)
+  	. = ALIGN(4);
+	} > SDRAM
+
 
   /* Remove information from the compiler libraries */
   /DISCARD/ :
