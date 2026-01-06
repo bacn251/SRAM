@@ -31,6 +31,16 @@
 
 /* USER CODE BEGIN PV */
 /* Private variables ---------------------------------------------------------*/
+extern char aRXbuff[48];
+extern uint8_t fReceive_ok;
+
+/* Create buffer for reception and transmission           */
+/* It's up to user to redefine and/or remove those define */
+/** Received data over USB are stored in this buffer      */
+uint8_t UserRxBufferFS[APP_RX_DATA_SIZE];
+
+/** Data to send over USB CDC are stored in this buffer   */
+uint8_t UserTxBufferFS[APP_TX_DATA_SIZE];
 
 /* USER CODE END PV */
 
@@ -261,6 +271,21 @@ static int8_t CDC_Control_FS(uint8_t cmd, uint8_t* pbuf, uint16_t length)
 static int8_t CDC_Receive_FS(uint8_t* Buf, uint32_t *Len)
 {
   /* USER CODE BEGIN 6 */
+  static uint8_t cnt = 0;
+  uint32_t i;
+  for (i = 0; i < *Len; i++)
+  {
+    if (Buf[i] != '\n' && Buf[i] != '\r')
+    {
+      aRXbuff[cnt++] = Buf[i];
+    }
+    else if (Buf[i] == '\n' || Buf[i] == '\r')
+    {
+      cnt = 0;
+      fReceive_ok = 1;
+    }
+  }
+
   USBD_CDC_SetRxBuffer(&hUsbDeviceFS, &Buf[0]);
   USBD_CDC_ReceivePacket(&hUsbDeviceFS);
   return (USBD_OK);

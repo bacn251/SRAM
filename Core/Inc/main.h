@@ -57,9 +57,12 @@ void Error_Handler(void);
 /* USER CODE END EFP */
 
 /* Private defines -----------------------------------------------------------*/
+#define CS_PD_Pin GPIO_PIN_0
+#define CS_PD_GPIO_Port GPIOC
 
 /* USER CODE BEGIN Private defines */
-
+extern char aRXbuff[48];
+extern char aCopyBuff[48];
 /* USER CODE END Private defines */
 
 #ifdef __cplusplus

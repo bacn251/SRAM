@@ -7,7 +7,7 @@
   ******************************************************************************
   * @attention
   *
-  * Copyright (c) 2025 STMicroelectronics.
+  * Copyright (c) 2026 STMicroelectronics.
   * All rights reserved.
   *
   * This software is licensed under terms that can be found in the LICENSE file
@@ -60,10 +60,10 @@ void MX_FSMC_Init(void)
   hsram1.Init.WriteBurst = FSMC_WRITE_BURST_DISABLE;
   hsram1.Init.PageSize = FSMC_PAGE_SIZE_NONE;
   /* Timing */
-  Timing.AddressSetupTime = 2;
+  Timing.AddressSetupTime = 15;
   Timing.AddressHoldTime = 15;
-  Timing.DataSetupTime = 2;
-  Timing.BusTurnAroundDuration = 2;
+  Timing.DataSetupTime = 255;
+  Timing.BusTurnAroundDuration = 15;
   Timing.CLKDivision = 16;
   Timing.DataLatency = 17;
   Timing.AccessMode = FSMC_ACCESS_MODE_A;
