@@ -198,24 +198,50 @@ void Read()
 
 		CDC_Transmit_FS((uint8_t*)usb_buf, len);
 }
+
 void AD7175_Start_DMA_Read(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
 {
-	ad7175_cmd_buffer[0] = AD717X_COMM_REG_WEN | AD717X_COMM_REG_RD | AD717X_COMM_REG_RA(AD717X_DATA_REG);
-
-	HAL_GPIO_WritePin(CS_PORT, CS_PIN, GPIO_PIN_RESET);
-	HAL_SPI_TransmitReceive_DMA(hspi, ad7175_cmd_buffer, ad7175_rx_buffer, 4);
+    uint8_t cmd_buffer[3];
+    HAL_GPIO_WritePin(CS_PORT, CS_PIN, GPIO_PIN_RESET);
+    HAL_Delay(1);
+    cmd_buffer[0] = 0x02;
+    cmd_buffer[1] = 0x00;
+    cmd_buffer[2] = 0x80;
+    HAL_SPI_Transmit(hspi, cmd_buffer, 3, HAL_MAX_DELAY);
+    HAL_Delay(10);
 }
 void Record()
 {
 	 sdram_index = 0;
 	 recording = 1;
 	 record_start_tick = HAL_GetTick();
-	AD7175_Start_DMA_Read(&hspi2,CS_PD_GPIO_Port,CS_PD_Pin);
+	 AD7175_Start_DMA_Read(&hspi2,CS_PD_GPIO_Port,CS_PD_Pin);
 }
 void StopRecord(void)
 {
     recording = 0;
+
+    printf("Stopping record...\r\n");
+
+    // Dừng DMA nếu đang chạy
+    HAL_SPI_DMAStop(&hspi2);
+
+    // Software reset: 64 SCLKs với DIN=1
+    uint8_t reset_cmd[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+    HAL_SPI_Transmit(&hspi2, reset_cmd, 8, HAL_MAX_DELAY);
+
+    // Pull CS HIGH
+    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
+
+    HAL_Delay(10);
+
+    // Tắt CONTREAD bit
+    ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin,
+                     INTERFACE_MODE_REGISTER, 2, 0x0000);
+
+    printf("Record stopped. Samples: %lu\r\n", sdram_index);
 }
+
 void AD7175_Process(void)
 {
     if (!spi_done_flag) return;
@@ -226,9 +252,9 @@ void AD7175_Process(void)
     if (!recording) return;
 
     uint32_t data =
-           ((uint32_t)ad7175_rx_buffer[1] << 16) |
-           ((uint32_t)ad7175_rx_buffer[2] << 8) |
-           ad7175_rx_buffer[3];
+           ((uint32_t)ad7175_rx_buffer[0] << 16) |
+           ((uint32_t)ad7175_rx_buffer[1] << 8) |
+           ad7175_rx_buffer[2];
 
        data &= 0xFFFFFF;
 
@@ -243,21 +269,35 @@ void AD7175_Process(void)
 
 }
 
-void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-    if (hspi->Instance == SPI2)
-    {
-    	spi_done_flag=1;
-//    	AD7175_Process();
-    }
+	 if (hspi->Instance == SPI2 && recording) {
+	        // 1. Ghép 24-bit dữ liệu từ 3 byte đầu
+		    uint32_t data =
+		           ((uint32_t)ad7175_rx_buffer[0] << 16) |
+		           ((uint32_t)ad7175_rx_buffer[1] << 8) |
+		           ad7175_rx_buffer[2];
+
+		       data &= 0xFFFFFF;
+
+		       if (data != 0 && data != 0xFFFFFF)
+		          {
+		              float voltage = ((int32_t)data - 0x800000) * 5000.0f /
+		                              (1.5f * 0x555180);
+
+		              if (sdram_index < SDRAM_SIZE)
+		                  sdram_buffer[sdram_index++] = voltage;
+		          }
+	 }
 }
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-	  if (GPIO_Pin == EXT_Pin)
-	    {
-	        adc_start_read = 1;
-	    }
+    if (GPIO_Pin == EXT_Pin&& recording)
+    {
+    	HAL_SPI_Receive_DMA(&hspi2, ad7175_rx_buffer, 3);
+    }
 }
+
 void High()
 {
 }
@@ -353,16 +393,6 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-	  if (adc_start_read && hspi2.State == HAL_SPI_STATE_READY)
-	  {
-	      adc_start_read = 0;
-	      HAL_SPI_TransmitReceive_DMA(&hspi2,
-	                                     ad7175_cmd_buffer,
-	                                     ad7175_rx_buffer,
-	                                     4);
-	  }
-	  AD7175_Process();
-
     if (fReceive_ok == 1)
     {
       ProcessCommand(aRXbuff);
