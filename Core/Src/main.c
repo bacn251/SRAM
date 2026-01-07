@@ -89,6 +89,7 @@ volatile uint32_t sdram_index = 0;
 volatile uint8_t recording = 0;
 uint32_t record_start_tick = 0;
 volatile uint8_t spi_done_flag = 0;
+volatile uint8_t adc_start_read = 0;
 void Hard_Reset_SRAM_Chip(void)
 {
   memset((void *)0x60000000, 0, 2 * 1024 * 1024);
@@ -202,7 +203,7 @@ void AD7175_Start_DMA_Read(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint1
 	ad7175_cmd_buffer[0] = AD717X_COMM_REG_WEN | AD717X_COMM_REG_RD | AD717X_COMM_REG_RA(AD717X_DATA_REG);
 
 	HAL_GPIO_WritePin(CS_PORT, CS_PIN, GPIO_PIN_RESET);
-	HAL_SPI_TransmitReceive_DMA(hspi, ad7175_cmd_buffer, ad7175_rx_buffer, 5);
+	HAL_SPI_TransmitReceive_DMA(hspi, ad7175_cmd_buffer, ad7175_rx_buffer, 4);
 }
 void Record()
 {
@@ -240,12 +241,6 @@ void AD7175_Process(void)
                   sdram_buffer[sdram_index++] = voltage;
           }
 
-//    ad7175_cmd_buffer[0] = AD717X_COMM_REG_WEN | AD717X_COMM_REG_RD | AD717X_COMM_REG_RA(AD717X_DATA_REG);
-//    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive_DMA(&hspi2,
-                                ad7175_cmd_buffer,
-                                ad7175_rx_buffer,
-                                4);
 }
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
@@ -256,7 +251,13 @@ void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 //    	AD7175_Process();
     }
 }
-
+void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
+{
+	  if (GPIO_Pin == EXT_Pin)
+	    {
+	        adc_start_read = 1;
+	    }
+}
 void High()
 {
 }
@@ -283,16 +284,6 @@ void SendRecordToUSB(void)
 		      while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
 		      HAL_Delay(0.2);
 		  }
-//    char usb_buf[64];
-//
-//    for (uint32_t i = 0; i < sdram_index; i++)
-//    {
-//        int len = snprintf(usb_buf, sizeof(usb_buf),
-//                           "%lu,%.6f\r\n", i, sdram_buffer[i]);
-//
-//        while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-//        HAL_Delay(1); // tránh nghẽn USB
-//    }
 }
 
 void InitCommandHashTable()
@@ -362,20 +353,14 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-//	  for (uint32_t i = 0; i < SDRAM_SIZE; i++)
-//	  {
-//	      sdram_buffer[i] = (float)i * 0.01f;   // 0.00, 0.01, 0.02 ...
-//	  }
-//	  for (uint32_t i = 0; i < SDRAM_SIZE; i++)   // gửi thử 1000 mẫu đầu
-//	  {
-//	      int len = snprintf(usb_buf, sizeof(usb_buf),
-//	                         "%lu,%.3f\r\n", i, sdram_buffer[i]);
-//
-//	      while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-//	      HAL_Delay(2);
-//	  }
-//
-//    	         HAL_Delay(5000);
+	  if (adc_start_read && hspi2.State == HAL_SPI_STATE_READY)
+	  {
+	      adc_start_read = 0;
+	      HAL_SPI_TransmitReceive_DMA(&hspi2,
+	                                     ad7175_cmd_buffer,
+	                                     ad7175_rx_buffer,
+	                                     4);
+	  }
 	  AD7175_Process();
 
     if (fReceive_ok == 1)

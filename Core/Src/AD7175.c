@@ -24,63 +24,59 @@ uint8_t ad717x_reset(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS
 	return 0;
 }
 
-void AD7175_Setup1(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
-{
-	/* Initialize ADC mode register */
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_ADCMODE_REG, 2, 0x0000); // 500
-	/* Initialize Interface mode register */
-	// 0x0040 = Normal mode (not continuous read)
-	// Bit 6: Continuous read disabled
-	// This prevents reading same data multiple times
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, INTERFACE_MODE_REGISTER, 2, 0x0040); // Normal mode, not continuous
-	/* Initialize GPIO configuration register */
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GPIOCON_REG, 2, 0x0000);
-	/* Initialize Channel Map registers */
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_CHMAP2_REG, 2, 0x00);
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_CHMAP3_REG, 2, 0x00);
-	/* Initialize Setup Configuration registers */
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON0_REG, 2, 0x1F00); // 1f00 enable buffer//1f80
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON1_REG, 2, 0x1F00); // 1f00
-	/* Initialize Filter registers */
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON0_REG, 2, 0x200);
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON1_REG, 2, 0x200);
-	// ad717xRegisterSet(0x38,2,0);
-	// ad717xRegisterSet(0x39,2,0);
-	/* Initialize offset registers */
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_OFFSET0_REG, 3, 0x800000);
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_OFFSET1_REG, 3, 0x800000);
-	/* Initialize gain registers */
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GAIN0_REG, 3, 0x555180);
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GAIN1_REG, 3, 0x555180);
-}
-
+//void AD7175_Setup1(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
+//{
+//	/* Initialize ADC mode register */
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_ADCMODE_REG, 2, 0x6700); // 500
+//	/* Initialize Interface mode register */
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, INTERFACE_MODE_REGISTER, 2, 0x0040); // 1060//0x0040
+//	/* Initialize GPIO configuration register */
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GPIOCON_REG, 2, 0x0000);
+//	/* Initialize Channel Map registers */
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_CHMAP2_REG, 2, 0x00);
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_CHMAP3_REG, 2, 0x00);
+//	/* Initialize Setup Configuration registers */
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON0_REG, 2, 0x1F00); // 1f00 enable buffer//1f80
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON1_REG, 2, 0x1F00); // 1f00
+//	/* Initialize Filter registers */
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON0_REG, 2, 0x8D14);
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON1_REG, 2, 0x8D14);
+//	// ad717xRegisterSet(0x38,2,0);
+//	// ad717xRegisterSet(0x39,2,0);
+//	/* Initialize offset registers */
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_OFFSET0_REG, 3, 0x800000);
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_OFFSET1_REG, 3, 0x800000);
+//	/* Initialize gain registers */
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GAIN0_REG, 3, 0x555180);
+//	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GAIN1_REG, 3, 0x555180);
+//}
 // // AD7175 FOR SPEED MESUREMENT 1000ODR
-// void AD7175_Setup1(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
-// {
-// 	/* Initialize ADC mode register */
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_ADCMODE_REG, 2, 0x0000); // 500
-// 	/* Initialize Interface mode register */
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, INTERFACE_MODE_REGISTER, 2, 0x0040); // 1060//0x0040
-// 	/* Initialize GPIO configuration register */
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GPIOCON_REG, 2, 0x0000);
-// 	/* Initialize Channel Map registers */
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_CHMAP2_REG, 2, 0x00);
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_CHMAP3_REG, 2, 0x00);
-// 	/* Initialize Setup Configuration registers */
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON0_REG, 2, 0x1F00); // 1f00 enable buffer//1f80
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON1_REG, 2, 0x1F00); // 1f00
-// 	/* Initialize Filter registers */
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON0_REG, 2, 0x826A);
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON1_REG, 2, 0x826A);//
-// 	// ad717xRegisterSet(0x38,2,0);
-// 	// ad717xRegisterSet(0x39,2,0);
-// 	/* Initialize offset registers */
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_OFFSET0_REG, 3, 0x800000);
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_OFFSET1_REG, 3, 0x800000);
-// 	/* Initialize gain registers */
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GAIN0_REG, 3, 0x555180);
-// 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GAIN1_REG, 3, 0x555180);
-// }
+ void AD7175_Setup1(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
+ {
+ 	/* Initialize ADC mode register */
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_ADCMODE_REG, 2, 0x0000); // 500
+ 	/* Initialize Interface mode register */
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, INTERFACE_MODE_REGISTER, 2, 0x0040); // 1060//0x0040
+ 	/* Initialize GPIO configuration register */
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GPIOCON_REG, 2, 0x0000);
+ 	/* Initialize Channel Map registers */
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_CHMAP2_REG, 2, 0x00);
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_CHMAP3_REG, 2, 0x00);
+ 	/* Initialize Setup Configuration registers */
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON0_REG, 2, 0x1F00); // 1f00 enable buffer//1f80
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON1_REG, 2, 0x1F00); // 1f00
+ 	/* Initialize Filter registers */
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON0_REG, 2, 0x200);
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON1_REG, 2, 0x200);//
+ 	// ad717xRegisterSet(0x38,2,0);
+ 	// ad717xRegisterSet(0x39,2,0);
+ 	/* Initialize offset registers */
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_OFFSET0_REG, 3, 0x800000);
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_OFFSET1_REG, 3, 0x800000);
+ 	/* Initialize gain registers */
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GAIN0_REG, 3, 0x555180);
+ 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_GAIN1_REG, 3, 0x555180);
+ }
 
 uint8_t AD7175_WaitReady(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
 {

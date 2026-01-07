@@ -59,6 +59,9 @@ void Error_Handler(void);
 /* Private defines -----------------------------------------------------------*/
 #define CS_PD_Pin GPIO_PIN_0
 #define CS_PD_GPIO_Port GPIOC
+#define EXT_Pin GPIO_PIN_2
+#define EXT_GPIO_Port GPIOC
+#define EXT_EXTI_IRQn EXTI2_IRQn
 
 /* USER CODE BEGIN Private defines */
 extern char aRXbuff[48];
