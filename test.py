@@ -33,7 +33,7 @@ fig, ax = plt.subplots(figsize=(10, 6))
 plt.subplots_adjust(bottom=0.2) 
 
 line, = ax.plot([], [], label='Dữ liệu STM32', color='red', linewidth=1)
-ax.set_ylim(0, 500) 
+ax.set_ylim(0, 1200) 
 ax.set_xlabel('Mẫu số')
 ax.set_ylabel('Giá trị')
 ax.grid(True)

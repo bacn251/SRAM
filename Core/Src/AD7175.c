@@ -42,8 +42,8 @@ void AD7175_Setup1(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_P
 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON0_REG, 2, 0x1F00); // 1f00 enable buffer//1f80
 	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_SETUPCON1_REG, 2, 0x1F00); // 1f00
 	/* Initialize Filter registers */
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON0_REG, 2, 0x260);
-	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON1_REG, 2, 0x260);
+	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON0_REG, 2, 0x200);
+	ad717xRegisterSet(hspi, CS_PORT, CS_PIN, AD717X_FILTCON1_REG, 2, 0x200);
 	// ad717xRegisterSet(0x38,2,0);
 	// ad717xRegisterSet(0x39,2,0);
 	/* Initialize offset registers */
