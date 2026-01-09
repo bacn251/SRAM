@@ -112,8 +112,8 @@ typedef struct CommandNode
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-uint8_t ad7175_cmd_buffer[5];
-uint8_t ad7175_rx_buffer[5];
+uint8_t ad7175_cmd_buffer[3];
+uint8_t ad7175_rx_buffer[3];
 #define HASH_TABLE_SIZE 521
 CommandNode *commandHashTable[HASH_TABLE_SIZE];
 // Hash function
@@ -129,6 +129,8 @@ uint16_t HashFunction(const char *str)
   }
   return hash;
 }
+uint8_t tx_dummy[3] = {0x00, 0x00, 0x00};
+
 // Add command to hash table
 void AddCommandToHashTable(const char *command, CommandHandler handler, uint8_t use_strstr)
 {
@@ -183,121 +185,126 @@ void I2cScan(void)
 }
 void Read()
 {
-	char ch_info = 0, error_status = 0;
-		float Voltage_2_3Dmm = 0;
-		for (int i = 0; i < 2; i++)
-			{
-				HAL_Delay(50);
-				ad717x_get_code_and_error_status(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, 0x04,
-												 &ch_info, &error_status, &Voltage_2_3Dmm);
-			}
+  char ch_info = 0, error_status = 0;
+  float Voltage_2_3Dmm = 0;
+  for (int i = 0; i < 2; i++)
+  {
+    HAL_Delay(50);
+    ad717x_get_code_and_error_status(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, 0x04,
+                                     &ch_info, &error_status, &Voltage_2_3Dmm);
+  }
 
-		char usb_buf[64];
-		int len = snprintf(usb_buf, sizeof(usb_buf),
-		                   "V=%.6f\r\n", Voltage_2_3Dmm);
+  char usb_buf[64];
+  int len = snprintf(usb_buf, sizeof(usb_buf),
+                     "V=%.6f\r\n", Voltage_2_3Dmm);
 
-		CDC_Transmit_FS((uint8_t*)usb_buf, len);
+  CDC_Transmit_FS((uint8_t *)usb_buf, len);
 }
 
 void AD7175_Start_DMA_Read(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
 {
-    uint8_t cmd_buffer[3];
-    HAL_GPIO_WritePin(CS_PORT, CS_PIN, GPIO_PIN_RESET);
-    HAL_Delay(1);
-    cmd_buffer[0] = 0x02;
-    cmd_buffer[1] = 0x00;
-    cmd_buffer[2] = 0x80;
-    HAL_SPI_Transmit(hspi, cmd_buffer, 3, HAL_MAX_DELAY);
-    HAL_Delay(10);
+  uint8_t cmd_buffer[3];
+  HAL_GPIO_WritePin(CS_PORT, CS_PIN, GPIO_PIN_RESET);
+  HAL_Delay(1);
+  cmd_buffer[0] = 0x02;
+  cmd_buffer[1] = 0x00;
+  cmd_buffer[2] = 0x80;
+  HAL_SPI_Transmit(hspi, cmd_buffer, 3, HAL_MAX_DELAY);
+  HAL_Delay(10);
 }
 void Record()
 {
-	 sdram_index = 0;
-	 recording = 1;
-	 record_start_tick = HAL_GetTick();
-	 AD7175_Start_DMA_Read(&hspi2,CS_PD_GPIO_Port,CS_PD_Pin);
+  sdram_index = 0;
+  recording = 1;
+  record_start_tick = HAL_GetTick();
+  AD7175_Start_DMA_Read(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin);
+
+  HAL_SPI_TransmitReceive_DMA(&hspi2, tx_dummy, ad7175_rx_buffer, 3);
 }
 void StopRecord(void)
 {
-    recording = 0;
+  recording = 0;
 
-    printf("Stopping record...\r\n");
+  printf("Stopping record...\r\n");
 
-    // Dừng DMA nếu đang chạy
-    HAL_SPI_DMAStop(&hspi2);
+  // Dừng DMA nếu đang chạy
+  HAL_SPI_DMAStop(&hspi2);
 
-    // Software reset: 64 SCLKs với DIN=1
-    uint8_t reset_cmd[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
-    HAL_SPI_Transmit(&hspi2, reset_cmd, 8, HAL_MAX_DELAY);
+  // Software reset: 64 SCLKs với DIN=1
+  uint8_t reset_cmd[8] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
+  HAL_SPI_Transmit(&hspi2, reset_cmd, 8, HAL_MAX_DELAY);
 
-    // Pull CS HIGH
-    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
+  // Pull CS HIGH
+  HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
 
-    HAL_Delay(10);
+  HAL_Delay(10);
 
-    // Tắt CONTREAD bit
-    ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin,
-                     INTERFACE_MODE_REGISTER, 2, 0x0000);
+  // Tắt CONTREAD bit
+  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin,
+                    INTERFACE_MODE_REGISTER, 2, 0x0000);
 
-    printf("Record stopped. Samples: %lu\r\n", sdram_index);
+  printf("Record stopped. Samples: %lu\r\n", sdram_index);
 }
 
 void AD7175_Process(void)
 {
-    if (!spi_done_flag) return;
-    spi_done_flag = 0;
+  if (!spi_done_flag)
+    return;
+  spi_done_flag = 0;
 
-//    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
+  //    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
 
-    if (!recording) return;
+  if (!recording)
+    return;
 
-    uint32_t data =
-           ((uint32_t)ad7175_rx_buffer[0] << 16) |
-           ((uint32_t)ad7175_rx_buffer[1] << 8) |
-           ad7175_rx_buffer[2];
+  uint32_t data =
+      ((uint32_t)ad7175_rx_buffer[0] << 16) |
+      ((uint32_t)ad7175_rx_buffer[1] << 8) |
+      ad7175_rx_buffer[2];
 
-       data &= 0xFFFFFF;
+  data &= 0xFFFFFF;
 
-       if (data != 0 && data != 0xFFFFFF)
-          {
-              float voltage = ((int32_t)data - 0x800000) * 5000.0f /
-                              (1.5f * 0x555180);
+  if (data != 0 && data != 0xFFFFFF)
+  {
+    float voltage = ((int32_t)data - 0x800000) * 5000.0f /
+                    (1.5f * 0x555180);
 
-              if (sdram_index < SDRAM_SIZE)
-                  sdram_buffer[sdram_index++] = voltage;
-          }
-
+    if (sdram_index < SDRAM_SIZE)
+      sdram_buffer[sdram_index++] = voltage;
+  }
 }
 
-void HAL_SPI_RxCpltCallback(SPI_HandleTypeDef *hspi)
+void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-	 if (hspi->Instance == SPI2 && recording) {
-	        // 1. Ghép 24-bit dữ liệu từ 3 byte đầu
-		    uint32_t data =
-		           ((uint32_t)ad7175_rx_buffer[0] << 16) |
-		           ((uint32_t)ad7175_rx_buffer[1] << 8) |
-		           ad7175_rx_buffer[2];
+  if (hspi->Instance == SPI2 && recording)
+  {
+    //    // printf("DMA RX Complete\r\n");
+    //	        // 1. Ghép 24-bit dữ liệu từ 3 byte đầu
+    uint32_t data =
+        ((uint32_t)ad7175_rx_buffer[0] << 16) |
+        ((uint32_t)ad7175_rx_buffer[1] << 8) |
+        ad7175_rx_buffer[2];
 
-		       data &= 0xFFFFFF;
+    data &= 0xFFFFFF;
 
-		       if (data != 0 && data != 0xFFFFFF)
-		          {
-		              float voltage = ((int32_t)data - 0x800000) * 5000.0f /
-		                              (1.5f * 0x555180);
+    if (data != 0 && data != 0xFFFFFF)
+    {
+      float voltage = ((int32_t)data - 0x800000) * 5000.0f /
+                      (1.5f * 0x555180);
 
-		              if (sdram_index < SDRAM_SIZE)
-		                  sdram_buffer[sdram_index++] = voltage;
-		          }
-	 }
+      if (sdram_index < SDRAM_SIZE)
+        sdram_buffer[sdram_index++] = voltage;
+    }
+    // spi_done_flag = 1;
+  }
 }
 void HAL_GPIO_EXTI_Callback(uint16_t GPIO_Pin)
 {
-    if (GPIO_Pin == EXT_Pin&& recording)
-    {
-    	HAL_SPI_Receive_DMA(&hspi2, ad7175_rx_buffer, 3);
-    }
+  if (GPIO_Pin == EXT_Pin && recording)
+  {
+    HAL_SPI_TransmitReceive_DMA(&hspi2, tx_dummy, ad7175_rx_buffer, 3);
+  }
 }
-
 void High()
 {
 }
@@ -316,14 +323,15 @@ void DeleteRXBuff(void)
 }
 void SendRecordToUSB(void)
 {
-		  for (uint32_t i = 0; i < sdram_index; i++)   // gửi thử 1000 mẫu đầu
-		  {
-		      int len = snprintf(usb_buf, sizeof(usb_buf),
-		                         "%lu,%.3f\r\n", i, sdram_buffer[i]);
+  for (uint32_t i = 0; i < sdram_index; i++) // gửi thử 1000 mẫu đầu
+  {
+    int len = snprintf(usb_buf, sizeof(usb_buf),
+                       "%lu,%.3f\r\n", i, sdram_buffer[i]);
 
-		      while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-		      HAL_Delay(0.2);
-		  }
+    while (CDC_Transmit_FS((uint8_t *)usb_buf, len) == USBD_BUSY)
+      ;
+    HAL_Delay(0.2);
+  }
 }
 
 void InitCommandHashTable()
@@ -338,9 +346,9 @@ void InitCommandHashTable()
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
+ * @brief  The application entry point.
+ * @retval int
+ */
 int main(void)
 {
 
@@ -393,40 +401,40 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
+    // AD7175_Process();
     if (fReceive_ok == 1)
     {
       ProcessCommand(aRXbuff);
     }
     if (recording)
     {
-        if (HAL_GetTick() - record_start_tick >= 2000)
-        {
-            StopRecord();
-            SendRecordToUSB();
-        }
+      if (HAL_GetTick() - record_start_tick >= 2000)
+      {
+        StopRecord();
+        SendRecordToUSB();
+      }
     }
-
   }
   /* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+ * @brief System Clock Configuration
+ * @retval None
+ */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-  */
+   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+   * in the RCC_OscInitTypeDef structure.
+   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -441,9 +449,8 @@ void SystemClock_Config(void)
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+   */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
@@ -468,9 +475,9 @@ PUTCHAR_PROTOTYPE
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -483,12 +490,12 @@ void Error_Handler(void)
 }
 #ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
