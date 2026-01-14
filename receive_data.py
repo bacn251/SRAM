@@ -39,34 +39,53 @@ def main():
     print("Receiving data...")
     
     received_samples = []
-    start_time = time.time()
+    # start_time = time.time() # Removed absolute timeout
+    last_data_time = time.time()
+    remainder = b''
     
     try:
         while True:
-            # Đọc 3 bytes (vì MCU gửi 3 bytes mỗi mẫu)
-            data = ser.read(3)
-            
-            if len(data) == 3:
-                # Decode
-                sample = decode_24bit_signed(data[0], data[1], data[2])
-                received_samples.append(sample)
+            waiting = ser.in_waiting
+            if waiting > 0:
+                chunk = ser.read(waiting)
                 
-                # In thử một vài mẫu đầu để debug
-                if len(received_samples) <= 10:
-                    print(f"Sample {len(received_samples)}: {sample}")
-                elif len(received_samples) % 1000 == 0:
+                # Combine with leftover from previous read
+                data = remainder + chunk
+                
+                # Process full 3-byte groups
+                num_samples = len(data) // 3
+                process_len = num_samples * 3
+                
+                # Process these bytes
+                for i in range(0, process_len, 3):
+                    # Manual decode is faster than slicing repeatedly
+                    val = (data[i] << 16) | (data[i+1] << 8) | data[i+2]
+                    if val & 0x800000:
+                        val -= 0x1000000
+                    received_samples.append(val)
+                
+                # Save new remainder
+                remainder = data[process_len:]
+                
+                last_data_time = time.time()
+                
+                if len(received_samples) % 1000 == 0:
                      sys.stdout.write(f"\rReceived: {len(received_samples)} samples")
                      sys.stdout.flush()
             else:
-                # Timeout hoặc hết dữ liệu
-                if len(received_samples) > 0:
-                    # Nếu đã nhận được dữ liệu mà bị timeout -> coi như xong
-                    break
-                else:
-                    # Chưa nhận được gì
-                    if time.time() - start_time > 5:
-                         print("\nTimeout: No data received.")
-                         break
+                # No data pending
+                # Quit if we have data and it's been quiet for > 3 seconds
+                if len(received_samples) > 0 and (time.time() - last_data_time > 3.0):
+                     print("\nTransmission finished (Idle timeout).")
+                     break
+                
+                # Quit if no data at all for 10 seconds
+                if len(received_samples) == 0 and (time.time() - last_data_time > 10.0):
+                     print("\nTimeout: No start of data.")
+                     break
+                     
+                time.sleep(0.005) # Yield CPU
+                # Loop continues until one of the above break conditions triggers
                          
     except KeyboardInterrupt:
         print("\nStopped by user.")

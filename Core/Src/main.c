@@ -114,7 +114,7 @@ uint8_t ad7175_rx_buffer[5];
 #define HASH_TABLE_SIZE 521
 CommandNode *commandHashTable[HASH_TABLE_SIZE];
 #define SAMPLE_RATE 48000
-#define BLOCK_MS 1
+#define BLOCK_MS 10
 #define FRAME_PER_BLOCK (SAMPLE_RATE * BLOCK_MS / 1000)
 #define DMA_LEN (FRAME_PER_BLOCK * 4) // 24-bit stereo ghép
 
@@ -248,7 +248,7 @@ void DeleteRXBuff(void)
   memset(aRXbuff, 0, sizeof(aRXbuff));
 }
 /* OPTIMIZED SEND2 with PING-PONG BUFFERING */
-#define UART_BLOCK 8192             // Increased buffer size for better throughput
+#define UART_BLOCK 16384             // Increased buffer size for better throughput
 uint8_t uart_tx_buf[2][UART_BLOCK]; // Double buffer (Ping-Pong)
 volatile uint8_t uart_busy = 0;
 void Send2()
