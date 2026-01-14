@@ -20,6 +20,7 @@
 #include "main.h"
 #include "dma.h"
 #include "i2c.h"
+#include "i2s.h"
 #include "spi.h"
 #include "usart.h"
 #include "usb_device.h"
@@ -71,11 +72,8 @@ void SystemClock_Config(void);
 
 /* Private user code ---------------------------------------------------------*/
 /* USER CODE BEGIN 0 */
-enum Compare
-{
-  STRCMP, // khong tham so
-  STRSTR  // co tham so
-};
+volatile uint32_t samples1=0; // Moved to top for safety
+
 char usb_buf[64];
 char aRXbuff[48];
 char aCopyBuff[48];
@@ -115,6 +113,13 @@ uint8_t ad7175_cmd_buffer[5];
 uint8_t ad7175_rx_buffer[5];
 #define HASH_TABLE_SIZE 521
 CommandNode *commandHashTable[HASH_TABLE_SIZE];
+#define SAMPLE_RATE 48000
+#define BLOCK_MS 1
+#define FRAME_PER_BLOCK (SAMPLE_RATE * BLOCK_MS / 1000)
+#define DMA_LEN (FRAME_PER_BLOCK * 4) // 24-bit stereo ghép
+
+uint16_t i2s_dma_buf[DMA_LEN];
+
 // Hash function
 uint16_t HashFunction(const char *str)
 {
@@ -180,214 +185,95 @@ void I2cScan(void)
   float a = M24256ReadNumber(&hi2c1, EEPROM_ADDR, 8, 0);
   printf("gia tri a %f\n", a);
 }
-void Read()
-{
-  char ch_info = 0, error_status = 0;
-  float Voltage_2_3Dmm = 0;
-  for (int i = 0; i < 2; i++)
-  {
-    printf("rx[0] = 0x%0X\r\n", AD7175_WaitReady(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin));
-    HAL_Delay(50);
-    ad717x_get_code_and_error_status(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, 0x04,
-                                     &ch_info, &error_status, &Voltage_2_3Dmm);
-  }
 
-  char usb_buf[64];
-  int len = snprintf(usb_buf, sizeof(usb_buf),
-                     "V=%.6f\r\n", Voltage_2_3Dmm);
-
-  CDC_Transmit_FS((uint8_t *)usb_buf, len);
-}
-uint8_t AD7175_IsReady(void)
-{
-  uint8_t tx[2] = {0};
-  uint8_t rx[2] = {0};
-
-  tx[0] = AD717X_COMM_REG_WEN |
-          AD717X_COMM_REG_RD |
-          AD717X_COMM_REG_RA(AD717X_STATUS_REG);
-
-  HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive(&hspi2, tx, rx, 2, 10);
-  //    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
-
-  // RDY = bit7, 0 = READY
-  return ((rx[1] & 0x80) == 0);
-}
-
-void AD7175_Start_DMA_Read(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
-{
-  ad7175_cmd_buffer[0] = AD717X_COMM_REG_WEN | AD717X_COMM_REG_RD | AD717X_COMM_REG_RA(AD717X_DATA_REG);
-
-  HAL_GPIO_WritePin(CS_PORT, CS_PIN, GPIO_PIN_RESET);
-  HAL_SPI_TransmitReceive_DMA(hspi, ad7175_cmd_buffer, ad7175_rx_buffer, 5);
-}
-void Record()
-{
-  sdram_index = 0;
-  recording = 1;
-  record_start_tick = HAL_GetTick();
-  AD7175_Start_DMA_Read(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin);
-}
 void StopRecord(void)
 {
-  //	 printf("Record stopped. Samples: %lu\r\n", sdram_index);
+  HAL_I2S_DMAStop(&hi2s3);
+  // printf("Record stopped. Samples: %lu\r\n", samples1);
   recording = 0;
 }
-void AD7175_Process(void)
+void StartI2S()
 {
-  if (!spi_done_flag)
-    return;
-  spi_done_flag = 0;
-  HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
-
-  if (!recording)
-    return;
-
-  uint32_t data =
-      ((uint32_t)ad7175_rx_buffer[1] << 16) |
-      ((uint32_t)ad7175_rx_buffer[2] << 8) |
-      ad7175_rx_buffer[3];
-
-  data &= 0xFFFFFF;
-
-  if (data != 0 && data != 0xFFFFFF)
-  {
-    float voltage = ((int32_t)data - 0x800000) * 5000.0f /
-                    (1.5f * 0x555180);
-
-    if (sdram_index < SDRAM_SIZE)
-      sdram_buffer[sdram_index++] = voltage;
-  }
-  //       while (AD7175_IsReady() == 0)
-  //
-  //        {
-  //        }
-  HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_RESET);
-
-  // while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14))
-  //       {
-  //       }
-  HAL_SPI_TransmitReceive_DMA(&hspi2,
-                              ad7175_cmd_buffer,
-                              ad7175_rx_buffer,
-                              4);
+  samples1 = 0;
+  HAL_I2S_Receive_DMA(&hi2s3, (uint16_t *)i2s_dma_buf, DMA_LEN);
+  record_start_tick = HAL_GetTick();
+  recording = 1;
 }
 
-void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
+// Flags for main loop processing
+volatile uint8_t process_half = 0;
+volatile uint8_t process_full = 0;
+
+void process_i2s_24bit(uint16_t *buf, uint32_t len)
 {
-  if (hspi->Instance == SPI2)
+  for (uint32_t i = 0; i < len; i += 4)
   {
-    spi_done_flag = 1;
-    //    	AD7175_Process();
+    int32_t left =
+        ((int32_t)buf[i] << 8) |
+        ((int32_t)buf[i + 1] >> 8);
+
+    int32_t right =
+        ((int32_t)buf[i + 2] << 8) |
+        ((int32_t)buf[i + 3] >> 8);
+
+    // sign extend 24-bit
+    if (left & 0x00800000)
+      left |= 0xFF000000;
+    if (right & 0x00800000)
+      right |= 0xFF000000;
+    if (samples1 < SDRAM_SIZE)
+    {
+    		                  sdram_buffer[samples1++] = left;
+    }
+//    samples1++;
+    //  sdram_buffer[samples1++] = left;
   }
 }
 
-void High()
+void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {
+  process_half = 1;
 }
-void Low()
-{
-}
-void ID_ADC_BAT(void)
-{
 
-  uint16_t id = GetChipID(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin);
-  printf("Chip ID : %u\r\n", id);
+void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
+{
+  process_full = 1;
+}
+void HAL_I2S_ErrorCallback(I2S_HandleTypeDef *hi2s)
+{
+  printf("I2S Error Code: %lu\r\n", hi2s->ErrorCode);
 }
 void DeleteRXBuff(void)
 {
   memset(aRXbuff, 0, sizeof(aRXbuff));
 }
-void SendRecordToUSB(void)
-{
-  uint32_t total_samples = sdram_index;
-  uint8_t *ptr = (uint8_t *)sdram_buffer; // Ép kiểu sang byte để gửi
-  uint32_t bytes_to_send = total_samples * sizeof(float);
-  uint32_t chunk_size = 2048; // Gửi mỗi lần 2KB
-
-  for (uint32_t i = 0; i < bytes_to_send; i += chunk_size)
-  {
-    uint32_t current_len = ((bytes_to_send - i) > chunk_size) ? chunk_size : (bytes_to_send - i);
-
-    while (CDC_Transmit_FS(ptr + i, current_len) == USBD_BUSY)
-      ;
-
-    // Quan trọng: Phải đợi USB rảnh hoặc dùng Callback để tối ưu
-    // Ở đây dùng delay cực ngắn hoặc kiểm tra vòng lặp
-    HAL_Delay(1);
-  }
-  //        for (uint32_t i = 0; i < sdram_index; i++)   // gửi thử 1000 mẫu đầu
-  //		   {
-  //		       int len = snprintf(usb_buf, sizeof(usb_buf),
-  //		                          "%lu,%.3f\r\n", i, sdram_buffer[i]);
-  //
-  //		       while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-  //		       HAL_Delay(0.2);
-  //		   }
-  //    char usb_buf[64];
-  //
-  //    for (uint32_t i = 0; i < sdram_index; i++)
-  //    {
-  //        int len = snprintf(usb_buf, sizeof(usb_buf),
-  //                           "%lu,%.6f\r\n", i, sdram_buffer[i]);
-  //
-  //        while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-  //        HAL_Delay(1); // tránh nghẽn USB
-  //    }
-}
 /* OPTIMIZED SEND2 with PING-PONG BUFFERING */
-#define UART_BLOCK  8192 // Increased buffer size for better throughput
+#define UART_BLOCK 8192             // Increased buffer size for better throughput
 uint8_t uart_tx_buf[2][UART_BLOCK]; // Double buffer (Ping-Pong)
 volatile uint8_t uart_busy = 0;
-
-#define ADC_24BIT_MAX  0x7FFFFF
-#define ADC_24BIT_MIN -0x800000
-
-#define SAMPLE_RATE   96000
-#define SQUARE_FREQ   1000
-
-void Record2(void)
-{
-    int half_period = SAMPLE_RATE / (2 * SQUARE_FREQ);
-    int cnt = 0;
-    int32_t level = ADC_24BIT_MAX;
-
-    for (int i = 0; i < SDRAM_SIZE; i++)
-    {
-        sdram_buffer[i] = level;
-
-        if (++cnt >= half_period)
-        {
-            cnt = 0;
-            level = (level == ADC_24BIT_MAX) ? ADC_24BIT_MIN : ADC_24BIT_MAX;
-        }
-    }
-}
-
 void Send2()
 {
-  uint32_t total_bytes = SDRAM_SIZE * 3;
+  uint32_t total_bytes = samples1 * 3;
   uint32_t offset = 0;
-  uint8_t buf_idx = 0; 
+  uint8_t buf_idx = 0;
 
   // Pre-fill the first buffer
   uint32_t samples = UART_BLOCK / 3;
   if ((offset + samples * 3) > total_bytes)
-      samples = (total_bytes - offset) / 3;
-      
+    samples = (total_bytes - offset) / 3;
+
   for (uint32_t i = 0; i < samples; i++)
   {
-      int32_t s = sdram_buffer[(offset / 3) + i];
-      uart_tx_buf[buf_idx][3 * i] = (s >> 16) & 0xFF;
-      uart_tx_buf[buf_idx][3 * i + 1] = (s >> 8) & 0xFF;
-      uart_tx_buf[buf_idx][3 * i + 2] = s & 0xFF;
+    int32_t s = sdram_buffer[(offset / 3) + i];
+    uart_tx_buf[buf_idx][3 * i] = (s >> 16) & 0xFF;
+    uart_tx_buf[buf_idx][3 * i + 1] = (s >> 8) & 0xFF;
+    uart_tx_buf[buf_idx][3 * i + 2] = s & 0xFF;
   }
-  
+
   // Start first transmission
   uart_busy = 1;
   CDC_Transmit_FS((uint8_t *)uart_tx_buf[buf_idx], samples * 3);
-  
+
   offset += samples * 3;
   buf_idx = !buf_idx; // Switch to next buffer
 
@@ -408,36 +294,36 @@ void Send2()
     }
 
     // WAIT for previous transmission to complete
-    while (uart_busy) {
-        // Optional: Add timeout here if concerned about hanging
+    while (uart_busy)
+    {
+      // Optional: Add timeout here if concerned about hanging
     }
-    
+
     // SEND current buffer
     uart_busy = 1;
     CDC_Transmit_FS((uint8_t *)uart_tx_buf[buf_idx], samples * 3);
-    
+
     // Advance
     offset += samples * 3;
     buf_idx = !buf_idx; // Swap buffers
   }
-  
+
   // Wait for the very last packet to finish
-  while (uart_busy);
+  while (uart_busy)
+    ;
 }
 void Send()
 {
-	Record2();
-	Send2();
+  StartI2S();
 }
 void InitCommandHashTable()
 {
-  AddCommandToHashTable("ADC", ID_ADC_BAT, STRCMP);
-  AddCommandToHashTable("Record", Record, STRCMP);
-  AddCommandToHashTable("H", High, STRCMP);
-  AddCommandToHashTable("L", Low, STRCMP);
-  AddCommandToHashTable("I2C", I2cScan, STRCMP);
-  AddCommandToHashTable("Read", Read, STRCMP);
-   AddCommandToHashTable("Send", Send, STRCMP);
+  //  AddCommandToHashTable("ADC", ID_ADC_BAT, STRCMP);
+  //  AddCommandToHashTable("Record", Record, STRCMP);
+  //  AddCommandToHashTable("H", High, STRCMP);
+  //  AddCommandToHashTable("L", Low, STRCMP);
+//  AddCommandToHashTable("I2C", I2cScan, STRCMP);
+  AddCommandToHashTable("Send", Send, 0);
 }
 /* USER CODE END 0 */
 
@@ -447,7 +333,6 @@ void InitCommandHashTable()
  */
 int main(void)
 {
-
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -477,6 +362,7 @@ int main(void)
   MX_I2C3_Init();
   MX_I2C1_Init();
   MX_FSMC_Init();
+  MX_I2S3_Init();
   /* USER CODE BEGIN 2 */
   Hard_Reset_SRAM_Chip();
   InitCommandHashTable();
@@ -497,32 +383,29 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-    //	  for (uint32_t i = 0; i < SDRAM_SIZE; i++)
-    //	  {
-    //	      sdram_buffer[i] = (float)i * 0.01f;   // 0.00, 0.01, 0.02 ...
-    //	  }
-    //	  for (uint32_t i = 0; i < SDRAM_SIZE; i++)   // gửi thử 1000 mẫu đầu
-    //	  {
-    //	      int len = snprintf(usb_buf, sizeof(usb_buf),
-    //	                         "%lu,%.3f\r\n", i, sdram_buffer[i]);
-    //
-    //	      while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-    //	      HAL_Delay(2);
-    //	  }
-    //
-    //    	         HAL_Delay(5000);
-    AD7175_Process();
-
     if (fReceive_ok == 1)
     {
       ProcessCommand(aRXbuff);
     }
+
+    // Check flags from ISR
+    if (process_half)
+    {
+      process_half = 0;
+      process_i2s_24bit(&i2s_dma_buf[0], DMA_LEN / 2);
+    }
+    if (process_full)
+    {
+      process_full = 0;
+      process_i2s_24bit(&i2s_dma_buf[DMA_LEN / 2], DMA_LEN / 2);
+    }
+
     if (recording)
     {
       if (HAL_GetTick() - record_start_tick >= 2000)
       {
         StopRecord();
-        SendRecordToUSB();
+        Send2();
       }
     }
   }
