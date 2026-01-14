@@ -7,6 +7,8 @@ import struct
 import time
 import numpy as np
 from datetime import datetime
+import threading
+import queue
 
 # --- CẤU HÌNH ---
 COM_PORT = 'COM62' 
@@ -21,13 +23,23 @@ data_y = deque(maxlen=MAX_POINTS)
 current_index = 0
 log_file = None 
 
+# Queue để chuyển dữ liệu từ Thread đọc sang Thread vẽ
+data_queue = queue.Queue()
+is_recording = False
+read_thread = None
+
 # Kết nối Serial
 try:
     ser = serial.Serial(COM_PORT, BAUD_RATE, timeout=0.01)
+    # Cố gắng tăng buffer nếu HĐH cho phép (Windows có thể cần set trong Device Manager)
+    ser.set_buffer_size(rx_size=100000, tx_size=128000) 
     print(f"Đang kết nối với {COM_PORT}...")
     time.sleep(1) 
 except Exception as e:
-    print(f"Lỗi kết nối: {e}"); exit()
+    # set_buffer_size có thể lỗi trên một số version/OS, cứ ignore nếu lỗi
+    pass 
+except:
+    print(f"Lỗi nối Serial")
 
 # Thiết lập đồ thị
 fig, (ax_time, ax_fft) = plt.subplots(2, 1, figsize=(10, 8))
@@ -39,109 +51,138 @@ ax_time.set_title("Đồ thị thời gian (Time Domain)")
 ax_time.grid(True)
 
 line_fft, = ax_fft.plot([], [], color='blue', linewidth=1)
-# Điểm đánh dấu đỉnh FFT
 peak_dot, = ax_fft.plot([], [], 'ro', markersize=5, label='Peak') 
 ax_fft.set_title("Phân tích phổ tần số (FFT)")
 ax_fft.grid(True)
 
-# Text hiển thị thông số Vrms và Peak Freq
 text_info = fig.text(0.02, 0.02, '', fontsize=10, color='blue', fontweight='bold')
 
+def serial_read_loop():
+    global log_file, is_recording
+    remainder = b''
+    
+    print("Read thread started.")
+    while is_recording:
+        try:
+            waiting = ser.in_waiting
+            if waiting > 0:
+                chunk = ser.read(waiting)
+                data = remainder + chunk
+                
+                num_samples = len(data) // 3
+                if num_samples > 0:
+                    process_len = num_samples * 3
+                    raw_data = data[:process_len]
+                    remainder = data[process_len:]
+                    
+                    values = []
+                    for i in range(0, process_len, 3):
+                        val = (raw_data[i] << 16) | (raw_data[i+1] << 8) | raw_data[i+2]
+                        if val & 0x800000:
+                            val -= 0x1000000
+                        values.append(val)
+                    
+                    # Ghi file ngay trong thread đọc để đảm bảo tốc độ
+                    if log_file:
+                        log_file.write("\n".join([f"{v:.3f}" for v in values]) + "\n")
+                    
+                    # Đẩy sang GUI
+                    for v in values:
+                         data_queue.put(v)
+                else:
+                    remainder = data
+            else:
+                time.sleep(0.001) # Ngủ cực ngắn để không chiếm 100% CPU
+        except Exception as e:
+            print(f"Error in read thread: {e}")
+            break
+    print("Read thread stopped.")
+
 def start_record(event):
-    global current_index, log_file
+    global current_index, log_file, is_recording, read_thread
+    if is_recording: return # Đang chạy thì thôi
+    
     now = datetime.now()
     file_name = f"Data_{now.strftime('%Y%m%d_%H%M%S')}.txt"
     if log_file: log_file.close()
     log_file = open(file_name, "w")
+    
     data_x.clear()
     data_y.clear()
     current_index = 0
+    # Xả queue cũ
+    while not data_queue.empty(): data_queue.get()
+    
+    ser.reset_input_buffer()
     ser.write(b"Send\n") 
     print(f"Bắt đầu ghi: {file_name}")
+    
+    is_recording = True
+    read_thread = threading.Thread(target=serial_read_loop, daemon=True)
+    read_thread.start()
 
-ax_button = plt.axes([0.7, 0.02, 0.2, 0.05])
-btn_record = Button(ax_button, 'Gửi Record & Lưu', color='lightgreen')
-btn_record.on_clicked(start_record)
+def stop_record(event):
+    global is_recording, log_file
+    is_recording = False
+    if log_file:
+        log_file.close()
+        log_file = None
+    print("Đã dừng ghi.")
+
+ax_btn_start = plt.axes([0.6, 0.02, 0.15, 0.05])
+btn_start = Button(ax_btn_start, 'Start', color='lightgreen')
+btn_start.on_clicked(start_record)
+
+ax_btn_stop = plt.axes([0.8, 0.02, 0.15, 0.05])
+btn_stop = Button(ax_btn_stop, 'Stop', color='salmon')
+btn_stop.on_clicked(stop_record)
 
 def update(frame):
-    global current_index, log_file
+    global current_index
     
-    try:
-        waiting = ser.in_waiting
-        if waiting >= 3:
-            bytes_to_read = (waiting // 3) * 3
-            raw_data = ser.read(bytes_to_read)
-            # Parse 24-bit Big Endian integers using simple loop (or numpy for speed)
-            # Since performance matters for plotting, try a valid approach:
-            
-            # METHOD: Manual bit reconstruction
-            # We have raw bytes.
-            values = []
-            for i in range(0, len(raw_data), 3):
-                b2 = raw_data[i]     # MSB
-                b1 = raw_data[i+1]
-                b0 = raw_data[i+2]   # LSB
-                val = (b2 << 16) | (b1 << 8) | b0
-                if val & 0x800000:
-                    val -= 0x1000000
-                values.append(val)
-            
-            # (Optional: conversion to numpy array if desired, but append loop works for deque)
-            # values = ...
-            
-            if log_file:
-                log_file.write("\n".join([f"{v:.3f}" for v in values]) + "\n")
+    points_added = 0
+    # Lấy dữ liệu từ queue (tối đa 2000 điểm mỗi frame để tránh lag GUI)
+    while not data_queue.empty() and points_added < 2000:
+        val = data_queue.get()
+        data_y.append(val)
+        data_x.append(current_index)
+        current_index += 1
+        points_added += 1
+    
+    if points_added > 0:
+        line_time.set_data(data_x, data_y)
+        if len(data_x) > 0:
+            ax_time.set_xlim(max(0, data_x[-1] - VIEW_WINDOW), data_x[-1] + 100)
 
-            for v in values:
-                data_y.append(v)
-                data_x.append(current_index)
-                current_index += 1
+        # FFT Logic (giữ nguyên, chỉ chạy nếu có dữ liệu mới)
+        if len(data_y) > 100:
+            y_array = np.array(data_y)
+            y_ac = y_array - np.mean(y_array) 
+            N = len(y_ac)
+            fs = N / MEASURE_TIME 
+            yf = np.fft.rfft(y_ac)
+            xf = np.fft.rfftfreq(N, 1/fs)
+            amplitude = (2.0/N) * np.abs(yf)
             
-            line_time.set_data(data_x, data_y)
-            if len(data_x) > 0:
-                ax_time.set_xlim(max(0, data_x[-1] - VIEW_WINDOW), data_x[-1] + 100)
-
-            # # --- TÍNH TOÁN FFT & TÌM ĐỈNH ---
-            if len(data_y) > 100:
-                y_array = np.array(data_y)
-                y_ac = y_array - np.mean(y_array) # Loại bỏ DC
-                N = len(y_ac)
-                fs = N / MEASURE_TIME 
+            idx_start = 2 
+            if len(amplitude) > idx_start:
+                peak_idx = np.argmax(amplitude[idx_start:]) + idx_start
+                peak_freq = xf[peak_idx]
+                peak_amp = amplitude[peak_idx]
                 
-                yf = np.fft.rfft(y_ac)
-                xf = np.fft.rfftfreq(N, 1/fs)
-                amplitude = (2.0/N) * np.abs(yf)
+                line_fft.set_data(xf, amplitude)
+                peak_dot.set_data([peak_freq], [peak_amp]) 
+                ax_fft.set_xlim(0, fs)
+                ax_fft.set_ylim(0, max(amplitude) * 1.2 if max(amplitude) > 0 else 1)
                 
-                # TÌM ĐỈNH (PEAK)
-                # Bỏ qua thành phần tần số cực thấp sát 0Hz nếu cần
-                idx_start = 2 
-                if len(amplitude) > idx_start:
-                    peak_idx = np.argmax(amplitude[idx_start:]) + idx_start
-                    peak_freq = xf[peak_idx]
-                    peak_amp = amplitude[peak_idx]
-                    
-                    # Cập nhật đồ thị FFT
-                    line_fft.set_data(xf, amplitude)
-                    peak_dot.set_data([peak_freq], [peak_amp]) # Vẽ dấu chấm tại đỉnh
-                    
-                    ax_fft.set_xlim(0, fs)
-                    ax_fft.set_ylim(0, max(amplitude) * 1.2 if max(amplitude) > 0 else 1)
-                    
-                    # Tính Vrms
-                    vrms = np.sqrt(np.mean(y_array**2))
-                    
-                    # Hiển thị thông tin
-                    text_info.set_text(
-                        f"Vrms: {vrms:.3f} | Peak Freq: {peak_freq:.2f} Hz | Amp: {peak_amp:.3f}"
-                    )
-                
-    except Exception as e:
-        print(f"Lỗi: {e}")
+                vrms = np.sqrt(np.mean(y_array**2))
+                text_info.set_text(f"Vrms: {vrms:.3f} | Peak Freq: {peak_freq:.2f} Hz | Amp: {peak_amp:.3f}")
 
     return line_time, line_fft, peak_dot, text_info
 
-ani = FuncAnimation(fig, update, interval=50, blit=False, cache_frame_data=False)
+ani = FuncAnimation(fig, update, interval=20, blit=False, cache_frame_data=False)
 plt.show()
 
 if log_file: log_file.close()
 ser.close()
+is_recording = False
