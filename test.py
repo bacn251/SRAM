@@ -11,9 +11,9 @@ from datetime import datetime
 # --- CẤU HÌNH ---
 COM_PORT = 'COM62' 
 BAUD_RATE = 115200  
-MAX_POINTS = 100000  
+MAX_POINTS = 500000  
 VIEW_WINDOW = 5000   
-MEASURE_TIME = 2.0   
+MEASURE_TIME = 1.0   
 
 # Khởi tạo dữ liệu
 data_x = deque(maxlen=MAX_POINTS)
@@ -34,7 +34,7 @@ fig, (ax_time, ax_fft) = plt.subplots(2, 1, figsize=(10, 8))
 plt.subplots_adjust(bottom=0.15, hspace=0.4) 
 
 line_time, = ax_time.plot([], [], color='red', linewidth=1)
-ax_time.set_ylim(0, 1200) 
+ax_time.set_ylim(-100000000, 100000000) 
 ax_time.set_title("Đồ thị thời gian (Time Domain)")
 ax_time.grid(True)
 
@@ -56,7 +56,7 @@ def start_record(event):
     data_x.clear()
     data_y.clear()
     current_index = 0
-    ser.write(b"Record\n") 
+    ser.write(b"Send\n") 
     print(f"Bắt đầu ghi: {file_name}")
 
 ax_button = plt.axes([0.7, 0.02, 0.2, 0.05])
@@ -68,11 +68,26 @@ def update(frame):
     
     try:
         waiting = ser.in_waiting
-        if waiting >= 4:
-            bytes_to_read = (waiting // 4) * 4
+        if waiting >= 3:
+            bytes_to_read = (waiting // 3) * 3
             raw_data = ser.read(bytes_to_read)
-            num_floats = bytes_to_read // 4
-            values = struct.unpack(f'<{num_floats}f', raw_data)
+            # Parse 24-bit Big Endian integers using simple loop (or numpy for speed)
+            # Since performance matters for plotting, try a valid approach:
+            
+            # METHOD: Manual bit reconstruction
+            # We have raw bytes.
+            values = []
+            for i in range(0, len(raw_data), 3):
+                b2 = raw_data[i]     # MSB
+                b1 = raw_data[i+1]
+                b0 = raw_data[i+2]   # LSB
+                val = (b2 << 16) | (b1 << 8) | b0
+                if val & 0x800000:
+                    val -= 0x1000000
+                values.append(val)
+            
+            # (Optional: conversion to numpy array if desired, but append loop works for deque)
+            # values = ...
             
             if log_file:
                 log_file.write("\n".join([f"{v:.3f}" for v in values]) + "\n")
@@ -86,7 +101,7 @@ def update(frame):
             if len(data_x) > 0:
                 ax_time.set_xlim(max(0, data_x[-1] - VIEW_WINDOW), data_x[-1] + 100)
 
-            # --- TÍNH TOÁN FFT & TÌM ĐỈNH ---
+            # # --- TÍNH TOÁN FFT & TÌM ĐỈNH ---
             if len(data_y) > 100:
                 y_array = np.array(data_y)
                 y_ac = y_array - np.mean(y_array) # Loại bỏ DC
@@ -109,7 +124,7 @@ def update(frame):
                     line_fft.set_data(xf, amplitude)
                     peak_dot.set_data([peak_freq], [peak_amp]) # Vẽ dấu chấm tại đỉnh
                     
-                    ax_fft.set_xlim(0, fs/2)
+                    ax_fft.set_xlim(0, fs)
                     ax_fft.set_ylim(0, max(amplitude) * 1.2 if max(amplitude) > 0 else 1)
                     
                     # Tính Vrms

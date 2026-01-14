@@ -83,8 +83,8 @@ char aCopyBuff[48];
 char vReceive = 0;
 uint8_t fReceive_ok = 0; // This flag is set on USART0 Receiver buffer overflow
 uint8_t CDC_Transmit_FS(uint8_t *Buf, uint16_t Len);
-#define SDRAM_SIZE (200 * 1024)
-float sdram_buffer[SDRAM_SIZE] __attribute__((section(".sdram_data")));
+#define SDRAM_SIZE (1000 * 288)
+int32_t sdram_buffer[SDRAM_SIZE] __attribute__((section(".sdram_data")));
 volatile uint32_t sdram_index = 0;
 volatile uint8_t recording = 0;
 uint32_t record_start_tick = 0;
@@ -182,105 +182,105 @@ void I2cScan(void)
 }
 void Read()
 {
-	char ch_info = 0, error_status = 0;
-		float Voltage_2_3Dmm = 0;
-		for (int i = 0; i < 2; i++)
-			{
-			 printf("rx[0] = 0x%0X\r\n", AD7175_WaitReady(&hspi2,CS_PD_GPIO_Port,CS_PD_Pin));
-				HAL_Delay(50);
-				ad717x_get_code_and_error_status(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, 0x04,
-												 &ch_info, &error_status, &Voltage_2_3Dmm);
-			}
+  char ch_info = 0, error_status = 0;
+  float Voltage_2_3Dmm = 0;
+  for (int i = 0; i < 2; i++)
+  {
+    printf("rx[0] = 0x%0X\r\n", AD7175_WaitReady(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin));
+    HAL_Delay(50);
+    ad717x_get_code_and_error_status(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, 0x04,
+                                     &ch_info, &error_status, &Voltage_2_3Dmm);
+  }
 
-		char usb_buf[64];
-		int len = snprintf(usb_buf, sizeof(usb_buf),
-		                   "V=%.6f\r\n", Voltage_2_3Dmm);
+  char usb_buf[64];
+  int len = snprintf(usb_buf, sizeof(usb_buf),
+                     "V=%.6f\r\n", Voltage_2_3Dmm);
 
-		CDC_Transmit_FS((uint8_t*)usb_buf, len);
+  CDC_Transmit_FS((uint8_t *)usb_buf, len);
 }
 uint8_t AD7175_IsReady(void)
 {
-    uint8_t tx[2] = {0};
-    uint8_t rx[2] = {0};
+  uint8_t tx[2] = {0};
+  uint8_t rx[2] = {0};
 
-    tx[0] = AD717X_COMM_REG_WEN |
-            AD717X_COMM_REG_RD  |
-            AD717X_COMM_REG_RA(AD717X_STATUS_REG);
+  tx[0] = AD717X_COMM_REG_WEN |
+          AD717X_COMM_REG_RD |
+          AD717X_COMM_REG_RA(AD717X_STATUS_REG);
 
-    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_RESET);
-    HAL_SPI_TransmitReceive(&hspi2, tx, rx, 2, 10);
-//    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
+  HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_RESET);
+  HAL_SPI_TransmitReceive(&hspi2, tx, rx, 2, 10);
+  //    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
 
-    // RDY = bit7, 0 = READY
-    return ((rx[1] & 0x80) == 0);
+  // RDY = bit7, 0 = READY
+  return ((rx[1] & 0x80) == 0);
 }
-
 
 void AD7175_Start_DMA_Read(SPI_HandleTypeDef *hspi, GPIO_TypeDef *CS_PORT, uint16_t CS_PIN)
 {
-	ad7175_cmd_buffer[0] = AD717X_COMM_REG_WEN | AD717X_COMM_REG_RD | AD717X_COMM_REG_RA(AD717X_DATA_REG);
+  ad7175_cmd_buffer[0] = AD717X_COMM_REG_WEN | AD717X_COMM_REG_RD | AD717X_COMM_REG_RA(AD717X_DATA_REG);
 
-	HAL_GPIO_WritePin(CS_PORT, CS_PIN, GPIO_PIN_RESET);
-	HAL_SPI_TransmitReceive_DMA(hspi, ad7175_cmd_buffer, ad7175_rx_buffer, 5);
+  HAL_GPIO_WritePin(CS_PORT, CS_PIN, GPIO_PIN_RESET);
+  HAL_SPI_TransmitReceive_DMA(hspi, ad7175_cmd_buffer, ad7175_rx_buffer, 5);
 }
 void Record()
 {
-	 sdram_index = 0;
-	 recording = 1;
-	 record_start_tick = HAL_GetTick();
-	AD7175_Start_DMA_Read(&hspi2,CS_PD_GPIO_Port,CS_PD_Pin);
+  sdram_index = 0;
+  recording = 1;
+  record_start_tick = HAL_GetTick();
+  AD7175_Start_DMA_Read(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin);
 }
 void StopRecord(void)
 {
-//	 printf("Record stopped. Samples: %lu\r\n", sdram_index);
-    recording = 0;
+  //	 printf("Record stopped. Samples: %lu\r\n", sdram_index);
+  recording = 0;
 }
 void AD7175_Process(void)
 {
-    if (!spi_done_flag) return;
-    spi_done_flag = 0;
-    HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
+  if (!spi_done_flag)
+    return;
+  spi_done_flag = 0;
+  HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_SET);
 
-    if (!recording) return;
+  if (!recording)
+    return;
 
-    uint32_t data =
-           ((uint32_t)ad7175_rx_buffer[1] << 16) |
-           ((uint32_t)ad7175_rx_buffer[2] << 8) |
-           ad7175_rx_buffer[3];
+  uint32_t data =
+      ((uint32_t)ad7175_rx_buffer[1] << 16) |
+      ((uint32_t)ad7175_rx_buffer[2] << 8) |
+      ad7175_rx_buffer[3];
 
-       data &= 0xFFFFFF;
+  data &= 0xFFFFFF;
 
-       if (data != 0 && data != 0xFFFFFF)
-          {
-              float voltage = ((int32_t)data - 0x800000) * 5000.0f /
-                              (1.5f * 0x555180);
+  if (data != 0 && data != 0xFFFFFF)
+  {
+    float voltage = ((int32_t)data - 0x800000) * 5000.0f /
+                    (1.5f * 0x555180);
 
-              if (sdram_index < SDRAM_SIZE)
-                  sdram_buffer[sdram_index++] = voltage;
-          }
-//       while (AD7175_IsReady() == 0)
-//
-//        {
-//        }
-       HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_RESET);
+    if (sdram_index < SDRAM_SIZE)
+      sdram_buffer[sdram_index++] = voltage;
+  }
+  //       while (AD7175_IsReady() == 0)
+  //
+  //        {
+  //        }
+  HAL_GPIO_WritePin(CS_PD_GPIO_Port, CS_PD_Pin, GPIO_PIN_RESET);
 
-//while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14))
-//      {
-//      }
-    HAL_SPI_TransmitReceive_DMA(&hspi2,
-                                ad7175_cmd_buffer,
-                                ad7175_rx_buffer,
-                                4);
+  // while (HAL_GPIO_ReadPin(GPIOB, GPIO_PIN_14))
+  //       {
+  //       }
+  HAL_SPI_TransmitReceive_DMA(&hspi2,
+                              ad7175_cmd_buffer,
+                              ad7175_rx_buffer,
+                              4);
 }
-
 
 void HAL_SPI_TxRxCpltCallback(SPI_HandleTypeDef *hspi)
 {
-    if (hspi->Instance == SPI2)
-    {
-    	spi_done_flag=1;
-//    	AD7175_Process();
-    }
+  if (hspi->Instance == SPI2)
+  {
+    spi_done_flag = 1;
+    //    	AD7175_Process();
+  }
 }
 
 void High()
@@ -301,41 +301,134 @@ void DeleteRXBuff(void)
 }
 void SendRecordToUSB(void)
 {
-	 uint32_t total_samples = sdram_index;
-	    uint8_t *ptr = (uint8_t*)sdram_buffer; // Ép kiểu sang byte để gửi
-	    uint32_t bytes_to_send = total_samples * sizeof(float);
-	    uint32_t chunk_size = 2048; // Gửi mỗi lần 2KB
+  uint32_t total_samples = sdram_index;
+  uint8_t *ptr = (uint8_t *)sdram_buffer; // Ép kiểu sang byte để gửi
+  uint32_t bytes_to_send = total_samples * sizeof(float);
+  uint32_t chunk_size = 2048; // Gửi mỗi lần 2KB
 
-	    for (uint32_t i = 0; i < bytes_to_send; i += chunk_size)
-	    {
-	        uint32_t current_len = ((bytes_to_send - i) > chunk_size) ? chunk_size : (bytes_to_send - i);
+  for (uint32_t i = 0; i < bytes_to_send; i += chunk_size)
+  {
+    uint32_t current_len = ((bytes_to_send - i) > chunk_size) ? chunk_size : (bytes_to_send - i);
 
-	        while (CDC_Transmit_FS(ptr + i, current_len) == USBD_BUSY);
+    while (CDC_Transmit_FS(ptr + i, current_len) == USBD_BUSY)
+      ;
 
-	        // Quan trọng: Phải đợi USB rảnh hoặc dùng Callback để tối ưu
-	        // Ở đây dùng delay cực ngắn hoặc kiểm tra vòng lặp
-	        HAL_Delay(1);
-	    }
-//        for (uint32_t i = 0; i < sdram_index; i++)   // gửi thử 1000 mẫu đầu
-//		   {
-//		       int len = snprintf(usb_buf, sizeof(usb_buf),
-//		                          "%lu,%.3f\r\n", i, sdram_buffer[i]);
-//
-//		       while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-//		       HAL_Delay(0.2);
-//		   }
-//    char usb_buf[64];
-//
-//    for (uint32_t i = 0; i < sdram_index; i++)
-//    {
-//        int len = snprintf(usb_buf, sizeof(usb_buf),
-//                           "%lu,%.6f\r\n", i, sdram_buffer[i]);
-//
-//        while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-//        HAL_Delay(1); // tránh nghẽn USB
-//    }
+    // Quan trọng: Phải đợi USB rảnh hoặc dùng Callback để tối ưu
+    // Ở đây dùng delay cực ngắn hoặc kiểm tra vòng lặp
+    HAL_Delay(1);
+  }
+  //        for (uint32_t i = 0; i < sdram_index; i++)   // gửi thử 1000 mẫu đầu
+  //		   {
+  //		       int len = snprintf(usb_buf, sizeof(usb_buf),
+  //		                          "%lu,%.3f\r\n", i, sdram_buffer[i]);
+  //
+  //		       while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
+  //		       HAL_Delay(0.2);
+  //		   }
+  //    char usb_buf[64];
+  //
+  //    for (uint32_t i = 0; i < sdram_index; i++)
+  //    {
+  //        int len = snprintf(usb_buf, sizeof(usb_buf),
+  //                           "%lu,%.6f\r\n", i, sdram_buffer[i]);
+  //
+  //        while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
+  //        HAL_Delay(1); // tránh nghẽn USB
+  //    }
+}
+/* OPTIMIZED SEND2 with PING-PONG BUFFERING */
+#define UART_BLOCK  8192 // Increased buffer size for better throughput
+uint8_t uart_tx_buf[2][UART_BLOCK]; // Double buffer (Ping-Pong)
+volatile uint8_t uart_busy = 0;
+
+#define ADC_24BIT_MAX  0x7FFFFF
+#define ADC_24BIT_MIN -0x800000
+
+#define SAMPLE_RATE   96000
+#define SQUARE_FREQ   1000
+
+void Record2(void)
+{
+    int half_period = SAMPLE_RATE / (2 * SQUARE_FREQ);
+    int cnt = 0;
+    int32_t level = ADC_24BIT_MAX;
+
+    for (int i = 0; i < SDRAM_SIZE; i++)
+    {
+        sdram_buffer[i] = level;
+
+        if (++cnt >= half_period)
+        {
+            cnt = 0;
+            level = (level == ADC_24BIT_MAX) ? ADC_24BIT_MIN : ADC_24BIT_MAX;
+        }
+    }
 }
 
+void Send2()
+{
+  uint32_t total_bytes = SDRAM_SIZE * 3;
+  uint32_t offset = 0;
+  uint8_t buf_idx = 0; 
+
+  // Pre-fill the first buffer
+  uint32_t samples = UART_BLOCK / 3;
+  if ((offset + samples * 3) > total_bytes)
+      samples = (total_bytes - offset) / 3;
+      
+  for (uint32_t i = 0; i < samples; i++)
+  {
+      int32_t s = sdram_buffer[(offset / 3) + i];
+      uart_tx_buf[buf_idx][3 * i] = (s >> 16) & 0xFF;
+      uart_tx_buf[buf_idx][3 * i + 1] = (s >> 8) & 0xFF;
+      uart_tx_buf[buf_idx][3 * i + 2] = s & 0xFF;
+  }
+  
+  // Start first transmission
+  uart_busy = 1;
+  CDC_Transmit_FS((uint8_t *)uart_tx_buf[buf_idx], samples * 3);
+  
+  offset += samples * 3;
+  buf_idx = !buf_idx; // Switch to next buffer
+
+  while (offset < total_bytes)
+  {
+    // PREPARE NEXT BUFFER while current one is sending
+    samples = UART_BLOCK / 3;
+    if ((offset + samples * 3) > total_bytes)
+      samples = (total_bytes - offset) / 3;
+
+    for (uint32_t i = 0; i < samples; i++)
+    {
+      int32_t s = sdram_buffer[(offset / 3) + i];
+      // Pack into the "next" buffer (not the one currently transmitting)
+      uart_tx_buf[buf_idx][3 * i] = (s >> 16) & 0xFF;
+      uart_tx_buf[buf_idx][3 * i + 1] = (s >> 8) & 0xFF;
+      uart_tx_buf[buf_idx][3 * i + 2] = s & 0xFF;
+    }
+
+    // WAIT for previous transmission to complete
+    while (uart_busy) {
+        // Optional: Add timeout here if concerned about hanging
+    }
+    
+    // SEND current buffer
+    uart_busy = 1;
+    CDC_Transmit_FS((uint8_t *)uart_tx_buf[buf_idx], samples * 3);
+    
+    // Advance
+    offset += samples * 3;
+    buf_idx = !buf_idx; // Swap buffers
+  }
+  
+  // Wait for the very last packet to finish
+  while (uart_busy);
+}
+void Send()
+{
+	Record2();
+	Send2();
+}
 void InitCommandHashTable()
 {
   AddCommandToHashTable("ADC", ID_ADC_BAT, STRCMP);
@@ -344,14 +437,14 @@ void InitCommandHashTable()
   AddCommandToHashTable("L", Low, STRCMP);
   AddCommandToHashTable("I2C", I2cScan, STRCMP);
   AddCommandToHashTable("Read", Read, STRCMP);
-//  AddCommandToHashTable("Check", AD7175_ReadStatus, STRCMP);
+   AddCommandToHashTable("Send", Send, STRCMP);
 }
 /* USER CODE END 0 */
 
 /**
-  * @brief  The application entry point.
-  * @retval int
-  */
+ * @brief  The application entry point.
+ * @retval int
+ */
 int main(void)
 {
 
@@ -404,21 +497,21 @@ int main(void)
     /* USER CODE END WHILE */
 
     /* USER CODE BEGIN 3 */
-//	  for (uint32_t i = 0; i < SDRAM_SIZE; i++)
-//	  {
-//	      sdram_buffer[i] = (float)i * 0.01f;   // 0.00, 0.01, 0.02 ...
-//	  }
-//	  for (uint32_t i = 0; i < SDRAM_SIZE; i++)   // gửi thử 1000 mẫu đầu
-//	  {
-//	      int len = snprintf(usb_buf, sizeof(usb_buf),
-//	                         "%lu,%.3f\r\n", i, sdram_buffer[i]);
-//
-//	      while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
-//	      HAL_Delay(2);
-//	  }
-//
-//    	         HAL_Delay(5000);
-	  AD7175_Process();
+    //	  for (uint32_t i = 0; i < SDRAM_SIZE; i++)
+    //	  {
+    //	      sdram_buffer[i] = (float)i * 0.01f;   // 0.00, 0.01, 0.02 ...
+    //	  }
+    //	  for (uint32_t i = 0; i < SDRAM_SIZE; i++)   // gửi thử 1000 mẫu đầu
+    //	  {
+    //	      int len = snprintf(usb_buf, sizeof(usb_buf),
+    //	                         "%lu,%.3f\r\n", i, sdram_buffer[i]);
+    //
+    //	      while (CDC_Transmit_FS((uint8_t*)usb_buf, len) == USBD_BUSY);
+    //	      HAL_Delay(2);
+    //	  }
+    //
+    //    	         HAL_Delay(5000);
+    AD7175_Process();
 
     if (fReceive_ok == 1)
     {
@@ -426,34 +519,33 @@ int main(void)
     }
     if (recording)
     {
-        if (HAL_GetTick() - record_start_tick >= 2000)
-        {
-            StopRecord();
-            SendRecordToUSB();
-        }
+      if (HAL_GetTick() - record_start_tick >= 2000)
+      {
+        StopRecord();
+        SendRecordToUSB();
+      }
     }
-
   }
   /* USER CODE END 3 */
 }
 
 /**
-  * @brief System Clock Configuration
-  * @retval None
-  */
+ * @brief System Clock Configuration
+ * @retval None
+ */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-  */
+   */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
-  * in the RCC_OscInitTypeDef structure.
-  */
+   * in the RCC_OscInitTypeDef structure.
+   */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -468,9 +560,8 @@ void SystemClock_Config(void)
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-  */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
-                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
+   */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
@@ -495,9 +586,9 @@ PUTCHAR_PROTOTYPE
 /* USER CODE END 4 */
 
 /**
-  * @brief  This function is executed in case of error occurrence.
-  * @retval None
-  */
+ * @brief  This function is executed in case of error occurrence.
+ * @retval None
+ */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -510,12 +601,12 @@ void Error_Handler(void)
 }
 #ifdef USE_FULL_ASSERT
 /**
-  * @brief  Reports the name of the source file and the source line number
-  *         where the assert_param error has occurred.
-  * @param  file: pointer to the source file name
-  * @param  line: assert_param error line source number
-  * @retval None
-  */
+ * @brief  Reports the name of the source file and the source line number
+ *         where the assert_param error has occurred.
+ * @param  file: pointer to the source file name
+ * @param  line: assert_param error line source number
+ * @retval None
+ */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */
