@@ -113,7 +113,7 @@ uint8_t ad7175_cmd_buffer[5];
 uint8_t ad7175_rx_buffer[5];
 #define HASH_TABLE_SIZE 521
 CommandNode *commandHashTable[HASH_TABLE_SIZE];
-#define SAMPLE_RATE 48000
+#define SAMPLE_RATE 96000
 #define BLOCK_MS 10
 #define FRAME_PER_BLOCK (SAMPLE_RATE * BLOCK_MS / 1000)
 #define DMA_LEN (FRAME_PER_BLOCK * 4) // 24-bit stereo ghép
@@ -209,18 +209,18 @@ void process_i2s_24bit(uint16_t *buf, uint32_t len)
   for (uint32_t i = 0; i < len; i += 4)
   {
     int32_t left =
-        ((int32_t)buf[i] << 8) |
-        ((int32_t)buf[i + 1] >> 8);
+        ((int32_t)buf[i] << 16) |
+        ((int32_t)buf[i + 1]);
 
     int32_t right =
         ((int32_t)buf[i + 2] << 8) |
         ((int32_t)buf[i + 3] >> 8);
-
+    left = left>>8;
     // sign extend 24-bit
-    if (left & 0x00800000)
-      left |= 0xFF000000;
-    if (right & 0x00800000)
-      right |= 0xFF000000;
+//    if (left & 0x00800000)
+//      left |= 0xFF000000;
+//    if (right & 0x00800000)
+//      right |= 0xFF000000;
     if (samples1 < SDRAM_SIZE)
     {
     		                  sdram_buffer[samples1++] = left;
@@ -248,7 +248,7 @@ void DeleteRXBuff(void)
   memset(aRXbuff, 0, sizeof(aRXbuff));
 }
 /* OPTIMIZED SEND2 with PING-PONG BUFFERING */
-#define UART_BLOCK 16384             // Increased buffer size for better throughput
+#define UART_BLOCK 19200             // Increased buffer size for better throughput
 uint8_t uart_tx_buf[2][UART_BLOCK]; // Double buffer (Ping-Pong)
 volatile uint8_t uart_busy = 0;
 void Send2()
@@ -328,11 +328,12 @@ void InitCommandHashTable()
 /* USER CODE END 0 */
 
 /**
- * @brief  The application entry point.
- * @retval int
- */
+  * @brief  The application entry point.
+  * @retval int
+  */
 int main(void)
 {
+
   /* USER CODE BEGIN 1 */
 
   /* USER CODE END 1 */
@@ -413,22 +414,22 @@ int main(void)
 }
 
 /**
- * @brief System Clock Configuration
- * @retval None
- */
+  * @brief System Clock Configuration
+  * @retval None
+  */
 void SystemClock_Config(void)
 {
   RCC_OscInitTypeDef RCC_OscInitStruct = {0};
   RCC_ClkInitTypeDef RCC_ClkInitStruct = {0};
 
   /** Configure the main internal regulator output voltage
-   */
+  */
   __HAL_RCC_PWR_CLK_ENABLE();
   __HAL_PWR_VOLTAGESCALING_CONFIG(PWR_REGULATOR_VOLTAGE_SCALE1);
 
   /** Initializes the RCC Oscillators according to the specified parameters
-   * in the RCC_OscInitTypeDef structure.
-   */
+  * in the RCC_OscInitTypeDef structure.
+  */
   RCC_OscInitStruct.OscillatorType = RCC_OSCILLATORTYPE_HSE;
   RCC_OscInitStruct.HSEState = RCC_HSE_ON;
   RCC_OscInitStruct.PLL.PLLState = RCC_PLL_ON;
@@ -443,8 +444,9 @@ void SystemClock_Config(void)
   }
 
   /** Initializes the CPU, AHB and APB buses clocks
-   */
-  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK | RCC_CLOCKTYPE_SYSCLK | RCC_CLOCKTYPE_PCLK1 | RCC_CLOCKTYPE_PCLK2;
+  */
+  RCC_ClkInitStruct.ClockType = RCC_CLOCKTYPE_HCLK|RCC_CLOCKTYPE_SYSCLK
+                              |RCC_CLOCKTYPE_PCLK1|RCC_CLOCKTYPE_PCLK2;
   RCC_ClkInitStruct.SYSCLKSource = RCC_SYSCLKSOURCE_PLLCLK;
   RCC_ClkInitStruct.AHBCLKDivider = RCC_SYSCLK_DIV1;
   RCC_ClkInitStruct.APB1CLKDivider = RCC_HCLK_DIV4;
@@ -469,9 +471,9 @@ PUTCHAR_PROTOTYPE
 /* USER CODE END 4 */
 
 /**
- * @brief  This function is executed in case of error occurrence.
- * @retval None
- */
+  * @brief  This function is executed in case of error occurrence.
+  * @retval None
+  */
 void Error_Handler(void)
 {
   /* USER CODE BEGIN Error_Handler_Debug */
@@ -484,12 +486,12 @@ void Error_Handler(void)
 }
 #ifdef USE_FULL_ASSERT
 /**
- * @brief  Reports the name of the source file and the source line number
- *         where the assert_param error has occurred.
- * @param  file: pointer to the source file name
- * @param  line: assert_param error line source number
- * @retval None
- */
+  * @brief  Reports the name of the source file and the source line number
+  *         where the assert_param error has occurred.
+  * @param  file: pointer to the source file name
+  * @param  line: assert_param error line source number
+  * @retval None
+  */
 void assert_failed(uint8_t *file, uint32_t line)
 {
   /* USER CODE BEGIN 6 */

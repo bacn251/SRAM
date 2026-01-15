@@ -46,7 +46,7 @@ fig, (ax_time, ax_fft) = plt.subplots(2, 1, figsize=(10, 8))
 plt.subplots_adjust(bottom=0.15, hspace=0.4) 
 
 line_time, = ax_time.plot([], [], color='red', linewidth=1)
-ax_time.set_ylim(-100000000, 100000000) 
+ax_time.set_ylim(-8388608*2, 8388607*2)
 ax_time.set_title("Đồ thị thời gian (Time Domain)")
 ax_time.grid(True)
 
