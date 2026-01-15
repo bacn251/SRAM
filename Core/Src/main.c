@@ -22,6 +22,7 @@
 #include "i2c.h"
 #include "i2s.h"
 #include "spi.h"
+#include "tim.h"
 #include "usart.h"
 #include "usb_device.h"
 #include "gpio.h"
@@ -87,6 +88,7 @@ volatile uint32_t sdram_index = 0;
 volatile uint8_t recording = 0;
 uint32_t record_start_tick = 0;
 volatile uint8_t spi_done_flag = 0;
+volatile uint8_t endtimer = 0;
 void Hard_Reset_SRAM_Chip(void)
 {
   memset((void *)0x60000000, 0, 2 * 1024 * 1024);
@@ -189,132 +191,141 @@ void I2cScan(void)
 void StopRecord(void)
 {
   HAL_I2S_DMAStop(&hi2s3);
-  // printf("Record stopped. Samples: %lu\r\n", samples1);
+  endtimer=0;
   recording = 0;
 }
 void StartI2S()
 {
-  samples1 = 0;
-  HAL_I2S_Receive_DMA(&hi2s3, (uint16_t *)i2s_dma_buf, DMA_LEN);
-  record_start_tick = HAL_GetTick();
-  recording = 1;
+//  samples1 = 0;
+  printf("start\n");
+//  HAL_I2S_Receive_DMA(&hi2s3, (uint16_t *)i2s_dma_buf, DMA_LEN);
+  HAL_TIM_Base_Start_IT(&htim3);
+//  endtimer = 0;
+//  recording = 1;
 }
 
 // Flags for main loop processing
-volatile uint8_t process_half = 0;
-volatile uint8_t process_full = 0;
-
-void process_i2s_24bit(uint16_t *buf, uint32_t len)
-{
-  for (uint32_t i = 0; i < len; i += 4)
-  {
-    int32_t left =
-        ((int32_t)buf[i] << 16) |
-        ((int32_t)buf[i + 1]);
-
-    int32_t right =
-        ((int32_t)buf[i + 2] << 8) |
-        ((int32_t)buf[i + 3] >> 8);
-    left = left>>8;
-    // sign extend 24-bit
-//    if (left & 0x00800000)
-//      left |= 0xFF000000;
-//    if (right & 0x00800000)
-//      right |= 0xFF000000;
-    if (samples1 < SDRAM_SIZE)
-    {
-    		                  sdram_buffer[samples1++] = left;
-    }
-//    samples1++;
-    //  sdram_buffer[samples1++] = left;
-  }
-}
-
-void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
-{
-  process_half = 1;
-}
-
-void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
-{
-  process_full = 1;
-}
-void HAL_I2S_ErrorCallback(I2S_HandleTypeDef *hi2s)
-{
-  printf("I2S Error Code: %lu\r\n", hi2s->ErrorCode);
-}
+//volatile uint8_t process_half = 0;
+//volatile uint8_t process_full = 0;
+//
+//void process_i2s_24bit(uint16_t *buf, uint32_t len)
+//{
+//  for (uint32_t i = 0; i < len; i += 4)
+//  {
+//    // Fix: Correct 24-bit MSB extraction
+//    int32_t left =
+//        ((int32_t)buf[i] << 16) |
+//        ((int32_t)buf[i + 1]);
+//
+//    // Right channel would be at buf[i+2] & buf[i+3]
+//
+//    // Sign extend 24-bit to 32-bit
+//     if (left & 0x80000000)
+//       left |= 0xFF000000;
+//
+//    if (samples1 < SDRAM_SIZE)
+//    {
+//      sdram_buffer[samples1++] = left;
+//    }
+//  }
+//}
+//
+//void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
+//{
+//  process_half = 1;
+//}
+//
+//void HAL_I2S_RxCpltCallback(I2S_HandleTypeDef *hi2s)
+//{
+//  process_full = 1;
+//}
+//void HAL_I2S_ErrorCallback(I2S_HandleTypeDef *hi2s)
+//{
+//  printf("I2S Error Code: %lu\r\n", hi2s->ErrorCode);
+//}
 void DeleteRXBuff(void)
 {
   memset(aRXbuff, 0, sizeof(aRXbuff));
 }
-/* OPTIMIZED SEND2 with PING-PONG BUFFERING */
-#define UART_BLOCK 19200             // Increased buffer size for better throughput
-uint8_t uart_tx_buf[2][UART_BLOCK]; // Double buffer (Ping-Pong)
-volatile uint8_t uart_busy = 0;
-void Send2()
-{
-  uint32_t total_bytes = samples1 * 3;
-  uint32_t offset = 0;
-  uint8_t buf_idx = 0;
-
-  // Pre-fill the first buffer
-  uint32_t samples = UART_BLOCK / 3;
-  if ((offset + samples * 3) > total_bytes)
-    samples = (total_bytes - offset) / 3;
-
-  for (uint32_t i = 0; i < samples; i++)
-  {
-    int32_t s = sdram_buffer[(offset / 3) + i];
-    uart_tx_buf[buf_idx][3 * i] = (s >> 16) & 0xFF;
-    uart_tx_buf[buf_idx][3 * i + 1] = (s >> 8) & 0xFF;
-    uart_tx_buf[buf_idx][3 * i + 2] = s & 0xFF;
-  }
-
-  // Start first transmission
-  uart_busy = 1;
-  CDC_Transmit_FS((uint8_t *)uart_tx_buf[buf_idx], samples * 3);
-
-  offset += samples * 3;
-  buf_idx = !buf_idx; // Switch to next buffer
-
-  while (offset < total_bytes)
-  {
-    // PREPARE NEXT BUFFER while current one is sending
-    samples = UART_BLOCK / 3;
-    if ((offset + samples * 3) > total_bytes)
-      samples = (total_bytes - offset) / 3;
-
-    for (uint32_t i = 0; i < samples; i++)
-    {
-      int32_t s = sdram_buffer[(offset / 3) + i];
-      // Pack into the "next" buffer (not the one currently transmitting)
-      uart_tx_buf[buf_idx][3 * i] = (s >> 16) & 0xFF;
-      uart_tx_buf[buf_idx][3 * i + 1] = (s >> 8) & 0xFF;
-      uart_tx_buf[buf_idx][3 * i + 2] = s & 0xFF;
-    }
-
-    // WAIT for previous transmission to complete
-    while (uart_busy)
-    {
-      // Optional: Add timeout here if concerned about hanging
-    }
-
-    // SEND current buffer
-    uart_busy = 1;
-    CDC_Transmit_FS((uint8_t *)uart_tx_buf[buf_idx], samples * 3);
-
-    // Advance
-    offset += samples * 3;
-    buf_idx = !buf_idx; // Swap buffers
-  }
-
-  // Wait for the very last packet to finish
-  while (uart_busy)
-    ;
-}
+///* OPTIMIZED SEND2 with PING-PONG BUFFERING */
+//#define UART_BLOCK 19200             // Increased buffer size for better throughput
+//uint8_t uart_tx_buf[2][UART_BLOCK]; // Double buffer (Ping-Pong)
+//volatile uint8_t uart_busy = 0;
+//void Send2()
+//{
+//  uint32_t total_bytes = samples1 * 3;
+//  uint32_t offset = 0;
+//  uint8_t buf_idx = 0;
+//
+//  // Pre-fill the first buffer
+//  uint32_t samples = UART_BLOCK / 3;
+//  if ((offset + samples * 3) > total_bytes)
+//    samples = (total_bytes - offset) / 3;
+//
+//  for (uint32_t i = 0; i < samples; i++)
+//  {
+//    int32_t s = sdram_buffer[(offset / 3) + i];
+//    uart_tx_buf[buf_idx][3 * i] = (s >> 16) & 0xFF;
+//    uart_tx_buf[buf_idx][3 * i + 1] = (s >> 8) & 0xFF;
+//    uart_tx_buf[buf_idx][3 * i + 2] = s & 0xFF;
+//  }
+//
+//  // Start first transmission
+//  uart_busy = 1;
+//  CDC_Transmit_FS((uint8_t *)uart_tx_buf[buf_idx], samples * 3);
+//
+//  offset += samples * 3;
+//  buf_idx = !buf_idx; // Switch to next buffer
+//
+//  while (offset < total_bytes)
+//  {
+//    // PREPARE NEXT BUFFER while current one is sending
+//    samples = UART_BLOCK / 3;
+//    if ((offset + samples * 3) > total_bytes)
+//      samples = (total_bytes - offset) / 3;
+//
+//    for (uint32_t i = 0; i < samples; i++)
+//    {
+//      int32_t s = sdram_buffer[(offset / 3) + i];
+//      // Pack into the "next" buffer (not the one currently transmitting)
+//      uart_tx_buf[buf_idx][3 * i] = (s >> 16) & 0xFF;
+//      uart_tx_buf[buf_idx][3 * i + 1] = (s >> 8) & 0xFF;
+//      uart_tx_buf[buf_idx][3 * i + 2] = s & 0xFF;
+//    }
+//
+//    // WAIT for previous transmission to complete
+//    while (uart_busy)
+//    {
+//      // Optional: Add timeout here if concerned about hanging
+//    }
+//
+//    // SEND current buffer
+//    uart_busy = 1;
+//    CDC_Transmit_FS((uint8_t *)uart_tx_buf[buf_idx], samples * 3);
+//
+//    // Advance
+//    offset += samples * 3;
+//    buf_idx = !buf_idx; // Swap buffers
+//  }
+//
+//  // Wait for the very last packet to finish
+//  while (uart_busy)
+//    ;
+//}
 void Send()
 {
   StartI2S();
+}
+uint8_t ch = 'a';
+void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
+{
+  if (htim->Instance == TIM3)
+  {
+
+
+    endtimer = 1;
+    HAL_TIM_Base_Stop_IT(&htim3);
+  }
 }
 void InitCommandHashTable()
 {
@@ -364,17 +375,18 @@ int main(void)
   MX_I2C1_Init();
   MX_FSMC_Init();
   MX_I2S3_Init();
+  MX_TIM3_Init();
   /* USER CODE BEGIN 2 */
   Hard_Reset_SRAM_Chip();
   InitCommandHashTable();
-  float number1 = 5;
-  M24256WriteNumber(&hi2c1, EEPROM_ADDR, 8, 0, number1);
-  CAT9555_init(&hi2c1, 0x21);
-  CAT9555_wt_2_byte(&hi2c1, 0x21, 0xC700); // reset cat for BATV2
-  AD7175_Setup1(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin);
-  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP1_REG, 2, 0x1043);
-  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP0_REG, 2, 0x0001);
-  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP1_REG, 2, 0x9043);
+//  float number1 = 5;
+//  M24256WriteNumber(&hi2c1, EEPROM_ADDR, 8, 0, number1);
+//  CAT9555_init(&hi2c1, 0x21);
+//  CAT9555_wt_2_byte(&hi2c1, 0x21, 0xC700); // reset cat for BATV2
+//  AD7175_Setup1(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin);
+//  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP1_REG, 2, 0x1043);
+//  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP0_REG, 2, 0x0001);
+//  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP1_REG, 2, 0x9043);
   /* USER CODE END 2 */
 
   /* Infinite loop */
@@ -388,26 +400,25 @@ int main(void)
     {
       ProcessCommand(aRXbuff);
     }
+//   if (process_half)
+//    {
+//      process_half = 0;
+////      process_i2s_24bit(&i2s_dma_buf[0], DMA_LEN / 2);
+//    }
+//    if (process_full)
+//    {
+//      process_full = 0;
+////      process_i2s_24bit(&i2s_dma_buf[DMA_LEN / 2], DMA_LEN / 2);
+//    }
 
-    // Check flags from ISR
-    if (process_half)
-    {
-      process_half = 0;
-      process_i2s_24bit(&i2s_dma_buf[0], DMA_LEN / 2);
-    }
-    if (process_full)
-    {
-      process_full = 0;
-      process_i2s_24bit(&i2s_dma_buf[DMA_LEN / 2], DMA_LEN / 2);
-    }
+    // Race condition removed: Processing is done in the callback
+    // (Flags process_half and process_full are no longer used here)
 
-    if (recording)
+    if (endtimer)
     {
-      if (HAL_GetTick() - record_start_tick >= 2000)
-      {
-        StopRecord();
-        Send2();
-      }
+    	  CDC_Transmit_FS(&ch, 1);
+    	  endtimer=0;
+        // Send2();
     }
   }
   /* USER CODE END 3 */
