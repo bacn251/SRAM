@@ -116,9 +116,9 @@ CommandNode *commandHashTable[HASH_TABLE_SIZE];
 #define SAMPLE_RATE 96000
 #define BLOCK_MS 10
 #define FRAME_PER_BLOCK (SAMPLE_RATE * BLOCK_MS / 1000)
-#define DMA_LEN (FRAME_PER_BLOCK * 4) // 24-bit stereo ghép
+#define DMA_LEN 512 // 24-bit stereo ghép
 
-uint16_t i2s_dma_buf[DMA_LEN];
+uint32_t  i2s_dma_buf[DMA_LEN];
 
 // Hash function
 uint16_t HashFunction(const char *str)
@@ -186,12 +186,7 @@ void I2cScan(void)
   printf("gia tri a %f\n", a);
 }
 
-void StopRecord(void)
-{
-  HAL_I2S_DMAStop(&hi2s3);
-  // printf("Record stopped. Samples: %lu\r\n", samples1);
-  recording = 0;
-}
+
 void StartI2S()
 {
   samples1 = 0;
@@ -203,32 +198,28 @@ void StartI2S()
 // Flags for main loop processing
 volatile uint8_t process_half = 0;
 volatile uint8_t process_full = 0;
-
-void process_i2s_24bit(uint16_t *buf, uint32_t len)
+void StopRecord(void)
 {
-  for (uint32_t i = 0; i < len; i += 4)
+  HAL_I2S_DMAStop(&hi2s3);
+  // printf("Record stopped. Samples: %lu\r\n", samples1);
+  recording = 0;
+  process_full=0;
+  process_half=0;
+}
+void process_i2s_24bit(uint32_t   *buf, uint32_t len)
+{
+    for (uint32_t i = 0; i < len; i+=2)
   {
-    int32_t left =
-        ((int32_t)buf[i] << 16) |
-        ((int32_t)buf[i + 1]);
+    int32_t sample = (int32_t)buf[i];
+    sample = sample >> 8;
 
-    int32_t right =
-        ((int32_t)buf[i + 2] << 8) |
-        ((int32_t)buf[i + 3] >> 8);
-    left = left>>8;
-    // sign extend 24-bit
-//    if (left & 0x00800000)
-//      left |= 0xFF000000;
-//    if (right & 0x00800000)
-//      right |= 0xFF000000;
     if (samples1 < SDRAM_SIZE)
     {
-    		                  sdram_buffer[samples1++] = left;
+        sdram_buffer[samples1++] = sample;
     }
-//    samples1++;
-    //  sdram_buffer[samples1++] = left;
   }
 }
+
 
 void HAL_I2S_RxHalfCpltCallback(I2S_HandleTypeDef *hi2s)
 {

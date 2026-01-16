@@ -15,7 +15,7 @@ COM_PORT = 'COM62'
 BAUD_RATE = 115200  
 MAX_POINTS = 500000  
 VIEW_WINDOW = 5000   
-MEASURE_TIME = 1.0   
+MEASURE_TIME = 2.0   
 
 # Khởi tạo dữ liệu
 data_x = deque(maxlen=MAX_POINTS)
