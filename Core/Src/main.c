@@ -119,8 +119,8 @@ CommandNode *commandHashTable[HASH_TABLE_SIZE];
 #define BLOCK_MS 10
 #define FRAME_PER_BLOCK (SAMPLE_RATE * BLOCK_MS / 1000)
 #define DMA_LEN (FRAME_PER_BLOCK * 4) // 24-bit stereo ghép
-
-uint16_t i2s_dma_buf[DMA_LEN];
+volatile uint8_t uart_busy = 0;
+uint16_t i2s_dma_buf[10];
 
 // Hash function
 uint16_t HashFunction(const char *str)
@@ -198,7 +198,7 @@ void StartI2S()
 {
 //  samples1 = 0;
   printf("start\n");
-//  HAL_I2S_Receive_DMA(&hi2s3, (uint16_t *)i2s_dma_buf, DMA_LEN);
+  HAL_I2S_Receive_DMA(&hi2s3, (uint16_t *)i2s_dma_buf, 10);
   HAL_TIM_Base_Start_IT(&htim3);
 //  endtimer = 0;
 //  recording = 1;
@@ -250,7 +250,7 @@ void DeleteRXBuff(void)
 ///* OPTIMIZED SEND2 with PING-PONG BUFFERING */
 //#define UART_BLOCK 19200             // Increased buffer size for better throughput
 //uint8_t uart_tx_buf[2][UART_BLOCK]; // Double buffer (Ping-Pong)
-//volatile uint8_t uart_busy = 0;
+
 //void Send2()
 //{
 //  uint32_t total_bytes = samples1 * 3;
@@ -321,19 +321,12 @@ void HAL_TIM_PeriodElapsedCallback(TIM_HandleTypeDef *htim)
 {
   if (htim->Instance == TIM3)
   {
-
-
     endtimer = 1;
     HAL_TIM_Base_Stop_IT(&htim3);
   }
 }
 void InitCommandHashTable()
 {
-  //  AddCommandToHashTable("ADC", ID_ADC_BAT, STRCMP);
-  //  AddCommandToHashTable("Record", Record, STRCMP);
-  //  AddCommandToHashTable("H", High, STRCMP);
-  //  AddCommandToHashTable("L", Low, STRCMP);
-//  AddCommandToHashTable("I2C", I2cScan, STRCMP);
   AddCommandToHashTable("Send", Send, 0);
 }
 /* USER CODE END 0 */
@@ -379,14 +372,6 @@ int main(void)
   /* USER CODE BEGIN 2 */
   Hard_Reset_SRAM_Chip();
   InitCommandHashTable();
-//  float number1 = 5;
-//  M24256WriteNumber(&hi2c1, EEPROM_ADDR, 8, 0, number1);
-//  CAT9555_init(&hi2c1, 0x21);
-//  CAT9555_wt_2_byte(&hi2c1, 0x21, 0xC700); // reset cat for BATV2
-//  AD7175_Setup1(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin);
-//  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP1_REG, 2, 0x1043);
-//  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP0_REG, 2, 0x0001);
-//  ad717xRegisterSet(&hspi2, CS_PD_GPIO_Port, CS_PD_Pin, AD717X_CHMAP1_REG, 2, 0x9043);
   /* USER CODE END 2 */
 
   /* Infinite loop */
